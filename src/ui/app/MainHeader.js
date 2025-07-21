@@ -562,6 +562,25 @@ export class MainHeader extends LitElement {
         }
     }
 
+    async _handleResearchClick() {
+        if (this.wasJustDragged) return;
+
+        try {
+            console.log('[MainHeader] Research button clicked, attempting navigation');
+            
+            if (!window.api) {
+                console.error('[MainHeader] window.api not available');
+                return;
+            }
+
+            // Use the new IPC method to navigate to research view
+            await window.api.mainHeader.sendResearchButtonClick();
+            console.log('[MainHeader] Research navigation request sent successfully');
+        } catch (error) {
+            console.error('[MainHeader] Failed to navigate to research view:', error);
+        }
+    }
+
     async _handleToggleAllWindowsVisibility() {
         if (this.wasJustDragged) return;
 
@@ -648,6 +667,15 @@ export class MainHeader extends LitElement {
                     </div>
                     <div class="icon-container">
                         ${this.renderShortcut(this.shortcuts.nextStep)}
+                    </div>
+                </div>
+
+                <div class="header-actions" @click=${() => this._handleResearchClick()}>
+                    <div class="action-text">
+                        <div class="action-text-content">Research</div>
+                    </div>
+                    <div class="icon-container">
+                        <div class="icon-box">📊</div>
                     </div>
                 </div>
 

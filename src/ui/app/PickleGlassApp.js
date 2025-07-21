@@ -3,6 +3,7 @@ import { SettingsView } from '../settings/SettingsView.js';
 import { ListenView } from '../listen/ListenView.js';
 import { AskView } from '../ask/AskView.js';
 import { ShortcutSettingsView } from '../settings/ShortCutSettingsView.js';
+import { ResearchView } from '../research/ResearchView.js';
 
 import '../listen/audioCore/renderer.js';
 
@@ -23,7 +24,7 @@ export class PickleGlassApp extends LitElement {
             height: 100%;
         }
 
-        ask-view, settings-view, history-view, help-view, setup-view {
+        ask-view, settings-view, research-view, history-view, help-view, setup-view {
             display: block;
             width: 100%;
             height: 100%;
@@ -53,6 +54,8 @@ export class PickleGlassApp extends LitElement {
         const urlParams = new URLSearchParams(window.location.search);
         this.currentView = urlParams.get('view') || 'listen';
         this.currentResponseIndex = -1;
+        
+        console.log('[PickleGlassApp] Initialized with view:', this.currentView, 'URL:', window.location.href);
         this.selectedProfile = localStorage.getItem('selectedProfile') || 'interview';
         
         // Language format migration for legacy users
@@ -127,6 +130,7 @@ export class PickleGlassApp extends LitElement {
 
 
     render() {
+        console.log('[PickleGlassApp] Rendering with currentView:', this.currentView);
         switch (this.currentView) {
             case 'listen':
                 return html`<listen-view
@@ -146,6 +150,8 @@ export class PickleGlassApp extends LitElement {
                 ></settings-view>`;
             case 'shortcut-settings':
                 return html`<shortcut-settings-view></shortcut-settings-view>`;
+            case 'research':
+                return html`<research-view></research-view>`;
             case 'history':
                 return html`<history-view></history-view>`;
             case 'help':
@@ -159,3 +165,4 @@ export class PickleGlassApp extends LitElement {
 }
 
 customElements.define('pickle-glass-app', PickleGlassApp);
+customElements.define('research-view', ResearchView);

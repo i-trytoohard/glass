@@ -15,10 +15,9 @@ window.pickleGlass = {
 
 
 window.api.renderer.onChangeListenCaptureState((_event, { status }) => {
-    if (!isListenView) {
-        console.log('[Renderer] Non-listen view: ignoring capture-state change');
-        return;
-    }
+    // Allow capture in any view mode (including research mode)
+    console.log(`[Renderer] Capture state change: ${status} (view: ${params.get('view') || 'unknown'})`);
+    
     if (status === "stop") {
         console.log('[Renderer] Session ended – stopping local capture');
         listenCapture.stopCapture();

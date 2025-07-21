@@ -5,6 +5,7 @@ const authService = require('../common/services/authService');
 const sessionRepository = require('../common/repositories/session');
 const sttRepository = require('./stt/repositories');
 const internalBridge = require('../../bridge/internalBridge');
+const researchService = require('../research/researchService');
 
 class ListenService {
     constructor() {
@@ -104,6 +105,14 @@ class ListenService {
         
         // Add to summary service for analysis
         this.summaryService.addConversationTurn(speaker, text);
+        
+        // Send to research service for question tracking (if research session is active)
+        try {
+            await researchService.processTranscriptSegment(speaker, text, Date.now());
+        } catch (error) {
+            console.error('[ListenService] Failed to process transcript for research:', error);
+            // Don't break the transcription flow if research analysis fails
+        }
     }
 
     async saveConversationTurn(speaker, transcription) {

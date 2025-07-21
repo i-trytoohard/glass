@@ -28,7 +28,7 @@ if (shouldUseLiquidGlass) {
 }
 /* ────────────────[ GLASS BYPASS ]─────────────── */
 
-let isContentProtectionOn = true;
+let isContentProtectionOn = false;
 let lastVisibleWindows = new Set(['header']);
 
 let currentHeaderState = 'apikey';
@@ -107,6 +107,36 @@ function setupWindowController(windowPool, layoutManager, movementManager) {
     });
     internalBridge.on('window:requestToggleAllWindowsVisibility', ({ targetVisibility }) => {
         changeAllWindowsVisibility(windowPool, targetVisibility);
+    });
+    internalBridge.on('window:requestNavigation', ({ view }) => {
+        console.log('[WindowManager] Navigation request received:', view);
+        const listenWin = windowPool.get('listen');
+        if (listenWin && !listenWin.isDestroyed()) {
+            const currentUrl = listenWin.webContents.getURL();
+            console.log('[WindowManager] Current URL:', currentUrl);
+            const url = new URL(currentUrl);
+            
+            let targetView = view;
+            
+            // Handle toggle logic for research view
+            if (view === 'toggle-research') {
+                const currentView = url.searchParams.get('view') || 'listen';
+                console.log('[WindowManager] Current view:', currentView, '-> Target view:', currentView === 'research' ? 'listen' : 'research');
+                targetView = currentView === 'research' ? 'listen' : 'research';
+            }
+            
+            url.searchParams.set('view', targetView);
+            const newUrl = url.toString();
+            console.log('[WindowManager] Loading new URL:', newUrl);
+            listenWin.loadURL(newUrl);
+            
+            // Make sure the window is visible
+            if (!listenWin.isVisible()) {
+                listenWin.show();
+            }
+        } else {
+            console.log('[WindowManager] Listen window not found or destroyed');
+        }
     });
     internalBridge.on('window:moveToDisplay', ({ displayId }) => {
         // movementManager.moveToDisplay(displayId);

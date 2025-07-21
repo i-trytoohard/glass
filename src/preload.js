@@ -116,6 +116,7 @@ contextBridge.exposeInMainWorld('api', {
     // invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
     sendListenButtonClick: (listenButtonText) => ipcRenderer.invoke('listen:changeSession', listenButtonText),
     sendAskButtonClick: () => ipcRenderer.invoke('ask:toggleAskButton'),
+    sendResearchButtonClick: () => ipcRenderer.invoke('research:navigate-to-research'),
     sendToggleAllWindowsVisibility: () => ipcRenderer.invoke('shortcut:toggleAllWindowsVisibility'),
     
     // Listeners
@@ -302,5 +303,41 @@ contextBridge.exposeInMainWorld('api', {
     // Listeners
     onChangeListenCaptureState: (callback) => ipcRenderer.on('change-listen-capture-state', callback),
     removeOnChangeListenCaptureState: (callback) => ipcRenderer.removeListener('change-listen-capture-state', callback)
+  },
+
+  // src/ui/research/ResearchView.js
+  research: {
+    // Study Management
+    createStudy: (studyData) => ipcRenderer.invoke('research:create-study', studyData),
+    getAllStudies: () => ipcRenderer.invoke('research:get-all-studies'),
+    getStudy: (studyId) => ipcRenderer.invoke('research:get-study', studyId),
+    updateStudy: (studyId, updateData) => ipcRenderer.invoke('research:update-study', { studyId, updateData }),
+    deleteStudy: (studyId) => ipcRenderer.invoke('research:delete-study', studyId),
+
+    // Question Management  
+    addQuestion: (studyId, questionData) => ipcRenderer.invoke('research:add-question', { studyId, questionData }),
+    getStudyQuestions: (studyId) => ipcRenderer.invoke('research:get-study-questions', studyId),
+    updateQuestion: (questionId, updateData) => ipcRenderer.invoke('research:update-question', { questionId, updateData }),
+    deleteQuestion: (questionId) => ipcRenderer.invoke('research:delete-question', questionId),
+
+    // Session Management
+    startSession: (studyId, participantData) => ipcRenderer.invoke('research:start-session', { studyId, participantData }),
+    endSession: () => ipcRenderer.invoke('research:end-session'),
+    getSessionStatus: () => ipcRenderer.invoke('research:get-session-status'),
+    getSessionReport: (sessionId) => ipcRenderer.invoke('research:get-session-report', sessionId),
+
+    // Follow-up Question Management
+    markFollowUpAsked: (questionId, response) => ipcRenderer.invoke('research:mark-followup-asked', { questionId, response }),
+    getFollowUpMetrics: () => ipcRenderer.invoke('research:get-followup-metrics'),
+
+    // Event Listeners
+    onSessionStarted: (callback) => ipcRenderer.on('research:session-started', callback),
+    onSessionEnded: (callback) => ipcRenderer.on('research:session-ended', callback),
+    onAnalysisUpdate: (callback) => ipcRenderer.on('research:analysis-update', callback),
+    onFollowUpExpired: (callback) => ipcRenderer.on('research:followup-expired', callback),
+    removeOnSessionStarted: (callback) => ipcRenderer.removeListener('research:session-started', callback),
+    removeOnSessionEnded: (callback) => ipcRenderer.removeListener('research:session-ended', callback),
+    removeOnAnalysisUpdate: (callback) => ipcRenderer.removeListener('research:analysis-update', callback),
+    removeOnFollowUpExpired: (callback) => ipcRenderer.removeListener('research:followup-expired', callback)
   }
 });

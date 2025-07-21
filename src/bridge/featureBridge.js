@@ -1,5 +1,6 @@
 // src/bridge/featureBridge.js
 const { ipcMain, app, BrowserWindow } = require('electron');
+const internalBridge = require('./internalBridge');
 const settingsService = require('../features/settings/settingsService');
 const authService = require('../features/common/services/authService');
 const whisperService = require('../features/common/services/whisperService');
@@ -12,6 +13,7 @@ const askService = require('../features/ask/askService');
 const listenService = require('../features/listen/listenService');
 const permissionService = require('../features/common/services/permissionService');
 const encryptionService = require('../features/common/services/encryptionService');
+const researchService = require('../features/research/researchService');
 
 module.exports = {
   // Renderer로부터의 요청을 수신하고 서비스로 전달
@@ -120,6 +122,37 @@ module.exports = {
     ipcMain.handle('model:get-provider-config', () => modelStateService.getProviderConfig());
     ipcMain.handle('model:re-initialize-state', async () => await modelStateService.initialize());
 
+    // Research Service
+    ipcMain.handle('research:create-study', async (event, studyData) => await researchService.createStudy(studyData));
+    ipcMain.handle('research:get-all-studies', async () => await researchService.getAllStudies());
+    ipcMain.handle('research:get-study', async (event, studyId) => await researchService.getStudy(studyId));
+    ipcMain.handle('research:update-study', async (event, { studyId, updateData }) => await researchService.updateStudy(studyId, updateData));
+    ipcMain.handle('research:delete-study', async (event, studyId) => await researchService.deleteStudy(studyId));
+    
+    ipcMain.handle('research:add-question', async (event, { studyId, questionData }) => await researchService.addQuestion(studyId, questionData));
+    ipcMain.handle('research:get-study-questions', async (event, studyId) => await researchService.getStudyQuestions(studyId));
+    ipcMain.handle('research:update-question', async (event, { questionId, updateData }) => await researchService.updateQuestion(questionId, updateData));
+    ipcMain.handle('research:delete-question', async (event, questionId) => await researchService.deleteQuestion(questionId));
+    
+    ipcMain.handle('research:start-session', async (event, { studyId, participantData }) => await researchService.startResearchSession(studyId, participantData));
+    ipcMain.handle('research:end-session', async () => await researchService.endResearchSession());
+    ipcMain.handle('research:get-session-status', async () => researchService.getSessionStatus());
+    ipcMain.handle('research:get-session-report', async (event, sessionId) => await researchService.getSessionReport(sessionId));
+    
+    // Follow-up Question Management
+    ipcMain.handle('research:mark-followup-asked', async (event, { questionId, response }) => {
+        return researchService.markFollowUpQuestionAsked(questionId, response);
+    });
+    ipcMain.handle('research:get-followup-metrics', async () => {
+        return researchService.followUpQuestionMetrics;
+    });
+
+    // Research navigation handler
+    ipcMain.handle('research:navigate-to-research', async () => {
+        // Request navigation with toggle logic handled by window manager
+        internalBridge.emit('window:requestNavigation', { view: 'toggle-research' });
+    });
+
     // LocalAIManager 이벤트를 모든 윈도우에 브로드캐스트
     localAIManager.on('install-progress', (service, data) => {
       const event = { service, ...data };
@@ -169,6 +202,36 @@ module.exports = {
 
     // 주기적 상태 동기화 시작
     localAIManager.startPeriodicSync();
+
+    // ResearchService 이벤트를 모든 윈도우에 브로드캐스트
+    researchService.on('session-started', (data) => {
+      BrowserWindow.getAllWindows().forEach(win => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('research:session-started', data);
+        }
+      });
+    });
+    researchService.on('session-ended', (data) => {
+      BrowserWindow.getAllWindows().forEach(win => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('research:session-ended', data);
+        }
+      });
+    });
+    researchService.on('analysis-update', (data) => {
+      BrowserWindow.getAllWindows().forEach(win => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('research:analysis-update', data);
+        }
+      });
+    });
+    researchService.on('followup-questions-expired', (data) => {
+      BrowserWindow.getAllWindows().forEach(win => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('research:followup-expired', data);
+        }
+      });
+    });
 
     // ModelStateService 이벤트를 모든 윈도우에 브로드캐스트
     modelStateService.on('state-updated', (state) => {
