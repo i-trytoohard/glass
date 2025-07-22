@@ -1,25 +1,62 @@
 import { html, css, LitElement } from '../assets/lit-core-2.7.4.min.js';
 
+console.log('[ResearchView] Module loading - ResearchView.js file being imported');
+
 export class ResearchView extends LitElement {
     static styles = css`
         :host {
             display: block;
-            width: 100%;
-            height: 100%;
-            padding: 12px;
-            background: rgba(255, 255, 255, 0.98);
-            border-radius: 8px;
-            color: var(--text-color);
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            color: white;
         }
 
         .research-container {
             display: flex;
             flex-direction: column;
             height: 100%;
-            gap: 12px;
+            width: 100%;
+            background: rgba(20, 20, 20, 0.8);
+            border-radius: 12px;
+            outline: 0.5px rgba(255, 255, 255, 0.2) solid;
+            outline-offset: -1px;
+            box-sizing: border-box;
+            position: relative;
             overflow-y: auto;
-            overflow-x: hidden;
+            padding: 12px 12px;
+            z-index: 1000;
+        }
+
+        .research-container::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .research-container::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 3px;
+        }
+
+        .research-container::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+        }
+
+        .research-container::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .research-container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.15);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            border-radius: 12px;
+            filter: blur(10px);
+            z-index: -1;
         }
 
         .research-header {
@@ -28,13 +65,14 @@ export class ResearchView extends LitElement {
             align-items: center;
             padding-bottom: 8px;
             padding-right: 16px;
-            border-bottom: 1px solid #e0e0e0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            flex-shrink: 0; /* Prevent header from shrinking */
         }
 
         .research-title {
             font-size: 18px;
             font-weight: 600;
-            color: #2d3748;
+            color: white;
         }
 
         .research-mode {
@@ -211,8 +249,9 @@ export class ResearchView extends LitElement {
             display: flex;
             flex-direction: column;
             gap: 10px;
-            min-height: 100%;
-            padding-bottom: 20px; /* Extra space at bottom for scrolling */
+            padding-bottom: 20px;
+            flex: 1 1 auto;
+            min-height: 0;
         }
 
         .session-status {
@@ -316,8 +355,8 @@ export class ResearchView extends LitElement {
 
         /* New Live Dashboard Styles */
         .section {
-            background: white;
-            border: 1px solid #e2e8f0;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 8px;
             padding: 16px;
             margin-bottom: 16px;
@@ -327,7 +366,7 @@ export class ResearchView extends LitElement {
             margin: 0 0 12px 0;
             font-size: 16px;
             font-weight: 600;
-            color: #2d3748;
+            color: white;
         }
 
         .section-title.collapsible {
@@ -461,8 +500,8 @@ export class ResearchView extends LitElement {
 
         /* Current Question */
         .current-question {
-            background: linear-gradient(135deg, #fff5f5, #fef5e7);
-            border-color: #fed7d7;
+            background: rgba(40, 40, 40, 0.7);
+            border-color: rgba(255, 255, 255, 0.08);
         }
 
         .question-display {
@@ -474,27 +513,27 @@ export class ResearchView extends LitElement {
         .question-text {
             font-size: 16px;
             font-weight: 500;
-            color: #2d3748;
+            color: white;
             line-height: 1.4;
         }
 
         .answer-section {
-            background: white;
+            background: rgba(30, 30, 30, 0.8);
             padding: 12px;
             border-radius: 6px;
-            border: 1px solid #e2e8f0;
+            border: 1px solid rgba(255, 255, 255, 0.08);
         }
 
         .answer-label {
             font-size: 12px;
             font-weight: 600;
-            color: #4a5568;
+            color: #e0e0e0;
             margin-bottom: 6px;
         }
 
         .answer-text {
             font-size: 14px;
-            color: #2d3748;
+            color: #e0e0e0;
             margin-bottom: 8px;
             min-height: 20px;
             font-style: italic;
@@ -530,8 +569,8 @@ export class ResearchView extends LitElement {
 
         /* Next Question */
         .next-question {
-            background: linear-gradient(135deg, #ebf8ff, #e6fffa);
-            border-color: #bee3f8;
+            background: rgba(40, 40, 40, 0.7);
+            border-color: rgba(255, 255, 255, 0.08);
         }
 
         .next-question-display {
@@ -543,16 +582,16 @@ export class ResearchView extends LitElement {
         .next-question-text {
             font-size: 15px;
             font-weight: 500;
-            color: #2d3748;
+            color: white;
         }
 
         .next-question-reason {
             font-size: 12px;
-            color: #4a5568;
-            background: white;
+            color: #e0e0e0;
+            background: rgba(30, 30, 30, 0.8);
             padding: 6px 10px;
             border-radius: 4px;
-            border: 1px solid #e2e8f0;
+            border: 1px solid rgba(255, 255, 255, 0.08);
             align-self: flex-start;
         }
 
@@ -563,8 +602,8 @@ export class ResearchView extends LitElement {
             display: flex;
             align-items: flex-start;
             padding: 12px;
-            background: #f7fafc;
-            border: 1px solid #e2e8f0;
+            background: rgba(30, 30, 30, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 6px;
             margin-bottom: 8px;
             gap: 12px;
@@ -621,112 +660,159 @@ export class ResearchView extends LitElement {
             text-align: center;
             padding: 12px;
         }
+
+        .current-question.off-script {
+            border-left: 4px solid #f56565;
+            background: rgba(245, 101, 101, 0.1);
+        }
+
+        .current-question.off-script .question-text {
+            color: #fc8181;
+        }
+
+        .confidence-ribbon {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 8px;
+            padding: 4px 8px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .confidence-score {
+            font-weight: 500;
+            color: white;
+        }
+
+        .confidence-score.high { color: #68d391; }
+        .confidence-score.medium { color: #ffd93d; }
+        .confidence-score.low { color: #fc8181; }
+
+        .detection-type {
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            text-transform: uppercase;
+            font-weight: 500;
+        }
+
+        .detection-type.scripted { background: #68d391; color: #1a202c; }
+        .detection-type.ambiguous { background: #ffd93d; color: #1a202c; }
+        .detection-type.off_script { background: #fc8181; color: #1a202c; }
+        .detection-type.manual_override { background: #9f7aea; color: white; }
+
+        .question-shortcuts-hint {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.4);
+            background: rgba(0, 0, 0, 0.3);
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .off-script-badge {
+            display: inline-block;
+            background: rgba(245, 101, 101, 0.2);
+            color: #fc8181;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 500;
+            margin-left: 8px;
+        }
     `;
 
     static properties = {
-        mode: { type: String }, // 'setup', 'live', 'analysis'
-        currentStudy: { type: Object },
-        questions: { type: Array },
-        sessionStatus: { type: Object },
-        suggestions: { type: Array },
-        studies: { type: Array },
-        showAddQuestion: { type: Boolean, state: true },
-        showAllQuestions: { type: Boolean, state: true },
-        currentQuestion: { type: Object }, // Current question being asked
-        nextQuestion: { type: Object }, // Next question to ask
+        mode: { type: String, state: true },
+        currentStudy: { type: Object, state: true },
+        sessionStatus: { type: Object, state: true },
+        questions: { type: Array, state: true },
+        currentQuestion: { type: Object, state: true },
+        nextQuestion: { type: Object, state: true },
         showPendingQuestions: { type: Boolean, state: true },
         showAskedQuestions: { type: Boolean, state: true },
-        followUpMetrics: { type: Object }, // Follow-up question analytics
-        expiringQuestions: { type: Set, state: true } // Questions currently fading out
+        
+        // Question Detection Properties
+        detectedQuestion: { type: Object, state: true },
+        questionDetectionActive: { type: Boolean, state: true },
+        detectionConfidence: { type: Number, state: true },
+        lastDetectionUpdate: { type: Object, state: true }
     };
 
     constructor() {
         super();
-        this.mode = 'setup';
+        this.mode = 'live'; // 'setup' | 'live' | 'analysis'
         this.currentStudy = null;
+        this.sessionStatus = {
+            isActive: false,
+            questionsCompleted: 0,
+            totalQuestions: 0,
+            completionPercentage: 0,
+            questionBreakdown: {}
+        };
         this.questions = [];
-        this.sessionStatus = null;
-        this.suggestions = [];
-        this.studies = [];
-        this.showAddQuestion = false;
-        this.showAllQuestions = false;
         this.currentQuestion = null;
         this.nextQuestion = null;
-        this.showPendingQuestions = false;
+        this.showPendingQuestions = true;
         this.showAskedQuestions = false;
-        this.followUpMetrics = { totalSuggested: 0, totalAsked: 0, responses: [] };
-        this.expiringQuestions = new Set();
         
-        // Auto-create fintech study for demo
-        setTimeout(() => this._autoCreateFintechStudy(), 1000);
+        // Question Detection
+        this.detectedQuestion = null;
+        this.questionDetectionActive = false;
+        this.detectionConfidence = 0;
+        this.lastDetectionUpdate = null;
+        
+        console.log('[ResearchView] Constructor - Component initialized');
     }
 
     connectedCallback() {
         super.connectedCallback();
+        console.log('[ResearchView] Connected to DOM - setting up event listeners');
         
-        console.log('[ResearchView] Connected to DOM');
-        
-        // Add event listeners only if window.api exists
-        if (window.api) {
-            try {
-                // Listen for research events
-                window.api.research.onSessionStarted(this._handleSessionStarted.bind(this));
-                window.api.research.onSessionEnded(this._handleSessionEnded.bind(this));
-                window.api.research.onAnalysisUpdate(this._handleAnalysisUpdate.bind(this));
-                window.api.research.onFollowUpExpired(this._handleFollowUpExpired.bind(this));
-                console.log('[ResearchView] Event listeners added');
-            } catch (error) {
-                console.error('[ResearchView] Failed to add event listeners:', error);
-            }
-        } else {
-            console.warn('[ResearchView] window.api not available, running in demo mode');
+        if (window.api?.research) {
+            // Existing listeners
+            window.api.research.onSessionStarted(this._handleSessionStarted.bind(this));
+            window.api.research.onSessionEnded(this._handleSessionEnded.bind(this));
+            window.api.research.onAnalysisUpdate(this._handleAnalysisUpdate.bind(this));
+            window.api.research.onInterviewStatusChanged(this._handleInterviewStatusChanged.bind(this));
+            
+            // Question Detection Listeners
+            window.api.research.onQuestionDetected(this._handleQuestionDetected.bind(this));
+            window.api.research.onCurrentQuestionChanged(this._handleCurrentQuestionChanged.bind(this));
+            window.api.research.onAmbiguousQuestionDetected(this._handleAmbiguousQuestionDetected.bind(this));
+            window.api.research.onOffScriptQuestionDetected(this._handleOffScriptQuestionDetected.bind(this));
+            window.api.research.onQuestionDetectionUpdate(this._handleQuestionDetectionUpdate.bind(this));
         }
         
-        // Load studies with error handling
-        this.loadStudies().catch(error => {
-            console.error('[ResearchView] Failed to load studies:', error);
-        });
+        // Set up keyboard shortcuts for manual override
+        this.setupKeyboardShortcuts();
     }
 
     disconnectedCallback() {
         super.disconnectedCallback();
-        if (window.api) {
-            window.api.research.removeOnSessionStarted(this._handleSessionStarted.bind(this));
-            window.api.research.removeOnSessionEnded(this._handleSessionEnded.bind(this));
-            window.api.research.removeOnAnalysisUpdate(this._handleAnalysisUpdate.bind(this));
-        }
-    }
-
-    async loadStudies() {
-        try {
-            if (!window.api) {
-                console.log('[ResearchView] API not available, using demo data');
-                this.studies = []; // Empty array for now
-                return;
-            }
+        
+        if (window.api?.research) {
+            // Remove existing listeners
+            window.api.research.removeOnSessionStarted(this._handleSessionStarted);
+            window.api.research.removeOnSessionEnded(this._handleSessionEnded);
+            window.api.research.removeOnAnalysisUpdate(this._handleAnalysisUpdate);
+            window.api.research.removeOnInterviewStatusChanged(this._handleInterviewStatusChanged);
             
-            const studies = await window.api.research.getAllStudies();
-            this.studies = studies || [];
-            console.log('[ResearchView] Loaded studies:', this.studies.length);
-        } catch (error) {
-            console.error('[ResearchView] Failed to load studies:', error);
-            this.studies = []; // Fallback to empty array
+            // Remove Question Detection Listeners
+            window.api.research.removeOnQuestionDetected(this._handleQuestionDetected);
+            window.api.research.removeOnCurrentQuestionChanged(this._handleCurrentQuestionChanged);
+            window.api.research.removeOnAmbiguousQuestionDetected(this._handleAmbiguousQuestionDetected);
+            window.api.research.removeOnOffScriptQuestionDetected(this._handleOffScriptQuestionDetected);
+            window.api.research.removeOnQuestionDetectionUpdate(this._handleQuestionDetectionUpdate);
         }
-    }
-
-    async createStudy(studyData) {
-        try {
-            console.log('[ResearchView] Calling API to create study:', studyData);
-            const study = await window.api.research.createStudy(studyData);
-            console.log('[ResearchView] Study created successfully:', study);
-            this.currentStudy = study;
-            this.mode = 'setup';
-            await this.loadQuestions();
-            // Force a re-render to update the UI
-            this.requestUpdate();
-        } catch (error) {
-            console.error('[ResearchView] Failed to create study:', error);
-        }
+        
+        // Clean up keyboard listeners
+        this.removeKeyboardShortcuts();
     }
 
     async loadQuestions() {
@@ -740,30 +826,6 @@ export class ResearchView extends LitElement {
         }
     }
 
-    async addQuestion(questionData) {
-        if (!this.currentStudy) return;
-        
-        try {
-            await window.api.research.addQuestion(this.currentStudy.id, questionData);
-            await this.loadQuestions();
-            this.showAddQuestion = false;
-        } catch (error) {
-            console.error('Failed to add question:', error);
-        }
-    }
-
-    async startResearchSession(participantData) {
-        if (!this.currentStudy) return;
-        
-        try {
-            const result = await window.api.research.startSession(this.currentStudy.id, participantData);
-            this.sessionStatus = result.status;
-            this.mode = 'live';
-        } catch (error) {
-            console.error('Failed to start research session:', error);
-        }
-    }
-
     async endResearchSession() {
         try {
             await window.api.research.endSession();
@@ -774,13 +836,79 @@ export class ResearchView extends LitElement {
     }
 
     _handleSessionStarted(event, data) {
-        console.log('Research session started:', data);
+        console.log('[ResearchView] Received session-started event with data:', {
+            hasData: !!data,
+            studyId: data?.studyId || 'No studyId',
+            hasStudy: !!data?.study,
+            studyTitle: data?.study?.title || 'No study title',
+            studyHasQuestions: !!data?.study?.questions,
+            studyQuestionCount: data?.study?.questions?.length || 0,
+            questionsCount: data?.questionsCount || 0
+        });
+        
+        // Extract study information from the session start data
+        if (data && data.study) {
+            // Use the study object directly from the event data
+            console.log('[ResearchView] Loading study from session start:', data.study.title);
+            this.currentStudy = data.study;
+            console.log('[ResearchView] Set currentStudy:', {
+                id: this.currentStudy.id,
+                title: this.currentStudy.title,
+                hasQuestions: !!this.currentStudy.questions,
+                questionCount: this.currentStudy.questions?.length || 0
+            });
+            
+            // Load questions for the study
+            if (data.study.questions) {
+                this.questions = data.study.questions;
+                console.log('[ResearchView] Loaded questions for active session:', this.questions.length);
+                console.log('[ResearchView] Calling requestUpdate after setting study and questions');
+                this.requestUpdate();
+            } else if (data.studyId && window.api && window.api.research) {
+                console.log('[ResearchView] Study questions not included, loading asynchronously');
+                // Fallback to async loading if questions not included
+                window.api.research.getLocalStudyQuestions(data.studyId).then(questions => {
+                    this.questions = questions || [];
+                    console.log('[ResearchView] Loaded questions for active session (async):', this.questions.length);
+                    this.requestUpdate();
+                }).catch(error => {
+                    console.error('[ResearchView] Failed to load questions for session:', error);
+                });
+            }
+        } else if (data && data.studyId) {
+            console.log('[ResearchView] No study object provided, falling back to async loading');
+            // Fallback to the old async method if study object not provided
+            if (window.api && window.api.research) {
+                window.api.research.getLocalStudy(data.studyId).then(study => {
+                    if (study) {
+                        console.log('[ResearchView] Loading study from session start (async):', study.title);
+                        this.currentStudy = study;
+                        
+                        // Load questions for the study
+                        return window.api.research.getLocalStudyQuestions(data.studyId);
+                    }
+                    return [];
+                }).then(questions => {
+                    this.questions = questions || [];
+                    console.log('[ResearchView] Loaded questions for active session (async fallback):', this.questions.length);
+                    this.requestUpdate();
+                }).catch(error => {
+                    console.error('[ResearchView] Failed to load study for session:', error);
+                });
+            }
+        } else {
+            console.warn('[ResearchView] No study data or studyId provided in session-started event');
+        }
+        
+        // Switch to live mode to show research interface
         this.mode = 'live';
+        this.requestUpdate();
     }
 
     _handleSessionEnded(event, data) {
-        console.log('Research session ended:', data);
+        console.log('[ResearchView] Research session ended:', data);
         this.mode = 'analysis';
+        this.requestUpdate();
     }
 
     _handleAnalysisUpdate(event, data) {
@@ -794,21 +922,152 @@ export class ResearchView extends LitElement {
     }
 
     _handleFollowUpExpired(event, data) {
-        console.log('Follow-up questions expired:', data.expiredQuestions);
-        // Add expired questions to the expiring set for fade animation
-        data.expiredQuestions.forEach(question => {
-            this.expiringQuestions.add(question.id);
-        });
-        
-        // Remove from expiring set after animation duration
-        setTimeout(() => {
-            data.expiredQuestions.forEach(question => {
-                this.expiringQuestions.delete(question.id);
-            });
+        console.log('Follow-up question expired:', data);
+        if (data.questionId && this.expiringQuestions) {
+            this.expiringQuestions.add(data.questionId);
             this.requestUpdate();
-        }, 500); // 500ms for fade animation (questions expire after 10s)
+            
+            // Remove the question after animation completes
+            setTimeout(() => {
+                this.suggestions = this.suggestions.filter(s => s.id !== data.questionId);
+                this.expiringQuestions.delete(data.questionId);
+                this.requestUpdate();
+            }, 500);
+        }
+    }
+
+    _handleInterviewStatusChanged(event, data) {
+        console.log('[ResearchView] Interview status changed:', data);
+        // Handle interview status changes if needed
+        this.requestUpdate();
+    }
+
+    // ==================== QUESTION DETECTION HANDLERS ====================
+
+    _handleQuestionDetected(event, data) {
+        console.log('[ResearchView] Question detected:', data);
+        this.detectedQuestion = data;
+        this.lastDetectionUpdate = data;
+        this.requestUpdate();
+    }
+
+    _handleCurrentQuestionChanged(event, data) {
+        console.log('[ResearchView] Current question changed:', data);
+        
+        const { questionId, question, detectionData } = data;
+        
+        if (question) {
+            this.currentQuestion = {
+                questionText: question.text,
+                category: question.category || 'general',
+                priority: question.priority || 'medium',
+                status: 'in_progress',
+                detectionConfidence: detectionData.score,
+                detectionType: detectionData.type,
+                currentAnswer: '', // Will be filled as participant responds
+                completeness_score: 0
+            };
+            
+            // Update session status
+            if (this.sessionStatus.questionBreakdown[questionId]) {
+                this.sessionStatus.questionBreakdown[questionId].status = 'in_progress';
+            }
+        }
         
         this.requestUpdate();
+    }
+
+    _handleAmbiguousQuestionDetected(event, data) {
+        console.log('[ResearchView] Ambiguous question detected:', data);
+        // Could show a toast or notification for manual clarification
+        this.lastDetectionUpdate = { ...data, needsManualReview: true };
+        this.requestUpdate();
+    }
+
+    _handleOffScriptQuestionDetected(event, data) {
+        console.log('[ResearchView] Off-script question detected:', data);
+        
+        // Set as current question with off-script styling
+        this.currentQuestion = {
+            questionText: data.text + ' (off-script)',
+            category: 'off-script',
+            priority: 'medium',
+            status: 'off_script',
+            detectionConfidence: data.score,
+            detectionType: 'off_script',
+            currentAnswer: '',
+            completeness_score: 0
+        };
+        
+        this.lastDetectionUpdate = data;
+        this.requestUpdate();
+    }
+
+    _handleQuestionDetectionUpdate(event, data) {
+        console.log('[ResearchView] Question detection update:', data);
+        this.lastDetectionUpdate = data;
+        this.detectionConfidence = data.score || 0;
+        this.requestUpdate();
+    }
+
+    // ==================== KEYBOARD SHORTCUTS ====================
+
+    setupKeyboardShortcuts() {
+        this.keyboardHandler = (e) => {
+            // Alt + Up Arrow: Previous question override
+            if (e.altKey && e.key === 'ArrowUp') {
+                e.preventDefault();
+                this.manualQuestionOverride('previous');
+            }
+            // Alt + Down Arrow: Next question override  
+            else if (e.altKey && e.key === 'ArrowDown') {
+                e.preventDefault();
+                this.manualQuestionOverride('next');
+            }
+        };
+        
+        document.addEventListener('keydown', this.keyboardHandler);
+    }
+
+    removeKeyboardShortcuts() {
+        if (this.keyboardHandler) {
+            document.removeEventListener('keydown', this.keyboardHandler);
+            this.keyboardHandler = null;
+        }
+    }
+
+    async manualQuestionOverride(direction) {
+        if (!this.questions || this.questions.length === 0) return;
+        
+        let targetQuestionId = null;
+        
+        if (direction === 'next') {
+            // Find next unasked question
+            const unasked = this.questions.filter(q => 
+                !this.sessionStatus.questionBreakdown[q.id] || 
+                this.sessionStatus.questionBreakdown[q.id].status === 'not_asked'
+            );
+            if (unasked.length > 0) {
+                targetQuestionId = unasked[0].id;
+            }
+        } else if (direction === 'previous') {
+            // Find previous question in sequence
+            if (this.currentQuestion) {
+                const currentIndex = this.questions.findIndex(q => q.text === this.currentQuestion.questionText);
+                if (currentIndex > 0) {
+                    targetQuestionId = this.questions[currentIndex - 1].id;
+                }
+            }
+        }
+        
+        if (targetQuestionId && window.api?.research) {
+            try {
+                await window.api.research.manualQuestionOverride(targetQuestionId);
+                console.log('[ResearchView] Manual override triggered:', targetQuestionId);
+            } catch (error) {
+                console.error('[ResearchView] Manual override failed:', error);
+            }
+        }
     }
 
     async _markFollowUpAsAsked(questionId) {
@@ -819,102 +1078,6 @@ export class ResearchView extends LitElement {
             }
         } catch (error) {
             console.error('[ResearchView] Failed to mark follow-up as asked:', error);
-        }
-    }
-
-
-
-    async _autoCreateFintechStudy() {
-        try {
-            // Check if we already have a study
-            if (this.currentStudy) return;
-            
-            console.log('[ResearchView] Auto-creating fintech study...');
-            
-            const fintechStudy = {
-                title: "What features do you expect from a fintech app?",
-                description: "UX research study to understand user expectations and preferences for fintech applications",
-                research_type: "user_interview",
-                methodology: "semi_structured",
-                participant_profile: "Age 18-30",
-                goals: "Understand user expectations, identify pain points, and discover desired features for fintech apps"
-            };
-
-            // Create the study
-            await this.createStudy(fintechStudy);
-
-            // Add predefined questions
-            const fintechQuestions = [
-                {
-                    question_text: "Can you describe your current experience with using fintech apps in general?",
-                    category: "experience",
-                    priority: "high",
-                    is_required: true
-                },
-                {
-                    question_text: "What are the most important tasks you want to accomplish using a fintech app?",
-                    category: "needs",
-                    priority: "high",
-                    is_required: true
-                },
-                {
-                    question_text: "Can you tell me about a time when a fintech app exceeded your expectations? What features stood out to you?",
-                    category: "positive_experience",
-                    priority: "medium",
-                    is_required: false
-                },
-                {
-                    question_text: "What are some frustrations or challenges you've encountered while using fintech apps?",
-                    category: "pain_points",
-                    priority: "high",
-                    is_required: true
-                },
-                {
-                    question_text: "How do you usually decide which fintech app to use? What factors influence your decision?",
-                    category: "decision_making",
-                    priority: "medium",
-                    is_required: false
-                },
-                {
-                    question_text: "Can you imagine an ideal fintech app that perfectly meets your needs? What features would it include?",
-                    category: "ideal_features",
-                    priority: "high",
-                    is_required: true
-                },
-                {
-                    question_text: "How do you prioritize different features in a fintech app? For example, security, ease of use, or variety of services?",
-                    category: "prioritization",
-                    priority: "medium",
-                    is_required: false
-                },
-                {
-                    question_text: "If you could improve one feature in the fintech apps you currently use, what would it be and why?",
-                    category: "improvement",
-                    priority: "medium",
-                    is_required: false
-                },
-                {
-                    question_text: "How do you feel about the security measures in fintech apps? Are there any specific features you expect in this area?",
-                    category: "security",
-                    priority: "high",
-                    is_required: true
-                }
-            ];
-
-            // Add all questions
-            for (let i = 0; i < fintechQuestions.length; i++) {
-                const questionData = { ...fintechQuestions[i], order_index: i };
-                await this.addQuestion(questionData);
-            }
-
-            console.log('[ResearchView] Fintech study created with', fintechQuestions.length, 'questions');
-            
-            // Auto-start the research session for demo purposes
-            console.log('[ResearchView] Auto-starting research session for demo...');
-            await this._startSession();
-            
-        } catch (error) {
-            console.error('[ResearchView] Failed to auto-create fintech study:', error);
         }
     }
 
@@ -930,173 +1093,42 @@ export class ResearchView extends LitElement {
                     <div class="research-mode ${this.mode}">${this.mode}</div>
                 </div>
 
-
-
-                ${this.mode === 'setup' ? this.renderSetupWizard() : ''}
                 ${this.mode === 'live' ? this.renderLiveDashboard() : ''}
                 ${this.mode === 'analysis' ? this.renderAnalysisDashboard() : ''}
             </div>
         `;
     }
 
-    renderSetupWizard() {
-        return html`
-            <div class="setup-wizard">
-                ${!this.currentStudy ? this.renderStudyCreation() : ''}
-                ${this.currentStudy ? this.renderQuestionSetup() : ''}
-            </div>
-        `;
-    }
-
-    renderStudyCreation() {
-        return html`
-            <div class="wizard-section">
-                <h3>Create Research Study</h3>
-                <form @submit="${this._handleStudySubmit}">
-                    <div class="form-group">
-                        <label for="study-title">Study Title</label>
-                        <input type="text" id="study-title" name="title" required 
-                               placeholder="e.g., Mobile Banking App Usability Study">
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="study-description">Description</label>
-                        <textarea id="study-description" name="description"
-                                  placeholder="Brief description of the study objectives and scope"></textarea>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="research-type">Research Type</label>
-                        <select id="research-type" name="research_type">
-                            <option value="user_interview">User Interview</option>
-                            <option value="usability_test">Usability Test</option>
-                            <option value="focus_group">Focus Group</option>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="methodology">Methodology</label>
-                        <select id="methodology" name="methodology">
-                            <option value="semi_structured">Semi-structured</option>
-                            <option value="structured">Structured</option>
-                            <option value="unstructured">Unstructured</option>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="participant-profile">Participant Profile</label>
-                        <textarea id="participant-profile" name="participant_profile"
-                                  placeholder="Target user demographics, experience level, etc."></textarea>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="goals">Study Goals</label>
-                        <textarea id="goals" name="goals"
-                                  placeholder="Key research questions and objectives"></textarea>
-                    </div>
-                    
-                    <button type="submit" class="btn btn-primary">Create Study</button>
-                </form>
-            </div>
-        `;
-    }
-
-    renderQuestionSetup() {
-        return html`
-            <div class="wizard-section">
-                <h3>Interview Questions (${this.questions.length})</h3>
-                
-                <div class="questions-list">
-                    ${this.questions.map((question, index) => html`
-                        <div class="question-item">
-                            <div class="question-content">
-                                <div class="question-text">${question.question_text}</div>
-                                <div class="question-meta">
-                                    <span class="question-category">${question.category}</span>
-                                    <span class="question-priority ${question.priority}">${question.priority}</span>
-                                    ${question.is_required ? html`<span class="question-priority high">required</span>` : ''}
-                                </div>
-                            </div>
-                            <div class="question-actions">
-                                <button class="btn btn-secondary btn-small" 
-                                        @click="${() => this._editQuestion(question)}">Edit</button>
-                                <button class="btn btn-danger btn-small"
-                                        @click="${() => this._deleteQuestion(question.id)}">Delete</button>
-                            </div>
-                        </div>
-                    `)}
-                </div>
-
-                ${this.showAddQuestion ? this.renderAddQuestionForm() : html`
-                    <button class="btn btn-secondary" @click="${() => this.showAddQuestion = true}">
-                        Add Question
-                    </button>
-                `}
-
-                <div style="display: flex; gap: 12px; margin-top: 20px;">
-                    <button class="btn btn-primary" 
-                            @click="${this._startSession}"
-                            ?disabled="${this.questions.length === 0}">
-                        Start Research Session
-                    </button>
-                </div>
-            </div>
-        `;
-    }
-
-    renderAddQuestionForm() {
-        return html`
-            <div class="add-question-form">
-                <form @submit="${this._handleQuestionSubmit}">
-                    <div class="form-group">
-                        <label for="question-text">Question</label>
-                        <textarea id="question-text" name="question_text" required
-                                  placeholder="What is your primary goal when using this feature?"></textarea>
-                    </div>
-                    
-                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
-                        <div class="form-group">
-                            <label for="question-category">Category</label>
-                            <select id="question-category" name="category">
-                                <option value="background">Background</option>
-                                <option value="behavior">Behavior</option>
-                                <option value="attitude">Attitude</option>
-                                <option value="demographic">Demographic</option>
-                            </select>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="question-priority">Priority</label>
-                            <select id="question-priority" name="priority">
-                                <option value="high">High</option>
-                                <option value="medium">Medium</option>
-                                <option value="low">Low</option>
-                            </select>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="question-required">
-                                <input type="checkbox" id="question-required" name="is_required"> Required
-                            </label>
-                        </div>
-                    </div>
-                    
-                    <div style="display: flex; gap: 12px;">
-                        <button type="submit" class="btn btn-primary">Add Question</button>
-                        <button type="button" class="btn btn-secondary"
-                                @click="${() => this.showAddQuestion = false}">Cancel</button>
-                    </div>
-                </form>
-            </div>
-        `;
-    }
-
     renderLiveDashboard() {
-        if (!this.sessionStatus) return html`<div>Loading session...</div>`;
+        console.log('[ResearchView] Rendering Live Dashboard');
+        // If no study is loaded yet, show a waiting state
+        if (!this.currentStudy) {
+            console.log('[ResearchView] No current study, showing waiting state');
+            return html`
+                <div class="section">
+                    <h3 class="section-title">Waiting for Interview to Start</h3>
+                    <div class="no-current-question">
+                        Select a study from the header and click "Start Interview" to begin.
+                    </div>
+                </div>
+            `;
+        }
+
+        if (!this.sessionStatus) {
+            console.log('[ResearchView] Session status not available, showing loading state');
+            return html`<div>Loading session...</div>`;
+        }
 
         const allQuestions = Object.entries(this.sessionStatus.questionBreakdown || {});
         const pendingQuestions = allQuestions.filter(([id, q]) => q.status === 'not_asked');
         const askedQuestions = allQuestions.filter(([id, q]) => q.status !== 'not_asked');
+
+        console.log('[ResearchView] Rendering Live Dashboard content:', {
+            pendingQuestionsCount: pendingQuestions.length,
+            askedQuestionsCount: askedQuestions.length,
+            currentQuestion: !!this.currentQuestion,
+            nextQuestion: !!this.nextQuestion
+        });
 
         return html`
             <div class="live-dashboard">
@@ -1121,15 +1153,31 @@ export class ResearchView extends LitElement {
                     </div>
                 ` : ''}
 
-                <!-- Current Question Being Asked Section -->
-                <div class="section current-question">
-                    <h3 class="section-title">🎯 Current Question Being Asked</h3>
+                <!-- Current Question Section -->
+                <div class="section current-question ${this.currentQuestion?.status === 'off_script' ? 'off-script' : ''}">
+                    <h3 class="section-title">🎯 Current Question</h3>
+                    <div class="question-shortcuts-hint">⌥↑/↓ to override</div>
                     <div class="current-question-content">
                         ${this.currentQuestion ? html`
-                            <div class="question-display">
+                            <div class="current-question-display">
                                 <div class="question-text">${this.currentQuestion.questionText}</div>
+                                
+                                ${this.currentQuestion.detectionConfidence !== undefined ? html`
+                                    <div class="confidence-ribbon">
+                                        <span>Match:</span>
+                                        <span class="confidence-score ${this._getConfidenceClass(this.currentQuestion.detectionConfidence)}">
+                                            ${Math.round(this.currentQuestion.detectionConfidence * 100)}%
+                                        </span>
+                                        ${this.currentQuestion.detectionType ? html`
+                                            <span class="detection-type ${this.currentQuestion.detectionType}">
+                                                ${this.currentQuestion.detectionType.replace('_', '-')}
+                                            </span>
+                                        ` : ''}
+                                    </div>
+                                ` : ''}
+                                
                                 <div class="answer-section">
-                                    <div class="answer-label">Current Answer:</div>
+                                    <div class="answer-label">Answer:</div>
                                     <div class="answer-text">
                                         ${this.currentQuestion.currentAnswer || 'No answer yet...'}
                                     </div>
@@ -1176,10 +1224,6 @@ export class ResearchView extends LitElement {
                         ${pendingQuestions.map(([id, question]) => html`
                             <div class="question-item">
                                 <div class="question-text">${question.text}</div>
-                                <div class="question-meta">
-                                    <span class="question-category">${question.category}</span>
-                                    <span class="question-priority ${question.priority}">${question.priority}</span>
-                                </div>
                             </div>
                         `)}
                         ${pendingQuestions.length === 0 ? html`
@@ -1200,7 +1244,12 @@ export class ResearchView extends LitElement {
                             <div class="question-item">
                                 <div class="question-status-indicator ${question.status}"></div>
                                 <div class="question-content">
-                                    <div class="question-text">${question.text}</div>
+                                    <div class="question-text">
+                                        ${question.text}
+                                        ${question.status === 'off_script' ? html`
+                                            <span class="off-script-badge">⚡ off-script</span>
+                                        ` : ''}
+                                    </div>
                                     <div class="question-meta">
                                         <span class="question-category">${question.category}</span>
                                         <span class="question-priority ${question.priority}">${question.priority}</span>
@@ -1237,46 +1286,17 @@ export class ResearchView extends LitElement {
             <div class="analysis-dashboard">
                 <h3>Session Analysis</h3>
                 <p>Research session completed. Analysis features coming soon...</p>
-                <button class="btn btn-primary" @click="${() => this.mode = 'setup'}">
-                    Start New Session
-                </button>
+                <p>To start a new session, select a study from the header and click "Start Interview".</p>
             </div>
         `;
     }
 
-
-
-    _handleStudySubmit(e) {
-        e.preventDefault();
-        const formData = new FormData(e.target);
-        const studyData = Object.fromEntries(formData.entries());
-        console.log('[ResearchView] Creating study with data:', studyData);
-        this.createStudy(studyData);
+    _getConfidenceClass(score) {
+        if (score >= 0.75) return 'high';
+        if (score >= 0.5) return 'medium';
+        return 'low';
     }
+}
 
-    _handleQuestionSubmit(e) {
-        e.preventDefault();
-        const formData = new FormData(e.target);
-        const questionData = Object.fromEntries(formData.entries());
-        questionData.is_required = formData.has('is_required');
-        questionData.order_index = this.questions.length;
-        this.addQuestion(questionData);
-    }
-
-    async _deleteQuestion(questionId) {
-        if (confirm('Are you sure you want to delete this question?')) {
-            try {
-                await window.api.research.deleteQuestion(questionId);
-                await this.loadQuestions();
-            } catch (error) {
-                console.error('Failed to delete question:', error);
-            }
-        }
-    }
-
-    async _startSession() {
-        const participantId = `participant_${Date.now()}`;
-        console.log('[ResearchView] Starting session with participant ID:', participantId);
-        await this.startResearchSession({ participant_id: participantId });
-    }
-} 
+console.log('[ResearchView] Defining custom element research-view');
+customElements.define('research-view', ResearchView);

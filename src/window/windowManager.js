@@ -289,7 +289,17 @@ function changeAllWindowsVisibility(windowPool, targetVisibility) {
  */
 async function handleWindowVisibilityRequest(windowPool, layoutManager, movementManager, name, shouldBeVisible) {
     console.log(`[WindowManager] Request: set '${name}' visibility to ${shouldBeVisible}`);
-    const win = windowPool.get(name);
+    let win = windowPool.get(name);
+
+    // Create study-dropdown window on-demand if it doesn't exist
+    if (name === 'study-dropdown' && (!win || win.isDestroyed())) {
+        console.log('[WindowManager] Creating study-dropdown window on-demand');
+        const header = windowPool.get('header');
+        if (header) {
+            createFeatureWindows(header, ['study-dropdown']);
+            win = windowPool.get('study-dropdown');
+        }
+    }
 
     if (!win || win.isDestroyed()) {
         console.warn(`[WindowManager] Window '${name}' not found or destroyed.`);
@@ -349,6 +359,24 @@ async function handleWindowVisibilityRequest(windowPool, layoutManager, movement
             }, 200);
 
             win.__lockedByButton = false;
+        }
+        return;
+    }
+
+    if (name === 'study-dropdown') {
+        if (shouldBeVisible) {
+            const position = layoutManager.calculateStudyDropdownPosition();
+            if (position) {
+                win.setBounds(position);
+                win.show();
+                win.moveTop();
+                win.setAlwaysOnTop(true);
+            } else {
+                console.warn('[WindowManager] Could not calculate study dropdown position.');
+            }
+        } else {
+            win.setAlwaysOnTop(false);
+            win.hide();
         }
         return;
     }
@@ -483,13 +511,17 @@ function createFeatureWindows(header, namesToCreate) {
     };
 
     const createFeatureWindow = (name) => {
-        if (windowPool.has(name)) return;
+        if (windowPool.has(name)) {
+            console.log(`[WindowManager] Window '${name}' already exists, skipping creation`);
+            return;
+        }
+        
+        console.log(`[WindowManager] Creating window: ${name}`);
         
         switch (name) {
             case 'listen': {
                 const listen = new BrowserWindow({
-                    ...commonChildOptions, width:400,minWidth:400,maxWidth:900,
-                    maxHeight:900,
+                    ...commonChildOptions, width:800, height:800, minWidth:400, minHeight:400, maxWidth:1200, maxHeight:1200, resizable: true,
                 });
                 listen.setContentProtection(isContentProtectionOn);
                 listen.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
@@ -623,6 +655,45 @@ function createFeatureWindows(header, namesToCreate) {
                 }
                 break;
             }
+
+            case 'study-dropdown': {
+                const studyDropdown = new BrowserWindow({
+                    ...commonChildOptions,
+                    width: 300,
+                    height: 250,
+                    modal: false,
+                    parent: undefined,
+                    alwaysOnTop: true,
+                    titleBarOverlay: false,
+                });
+
+                studyDropdown.setContentProtection(isContentProtectionOn);
+                studyDropdown.setVisibleOnAllWorkspaces(true, {visibleOnFullScreen:true});
+                if (process.platform === 'darwin') {
+                    studyDropdown.setWindowButtonVisibility(false);
+                }
+
+                const loadOptions = {};
+                if (!shouldUseLiquidGlass) {
+                    studyDropdown.loadFile(path.join(__dirname, '../ui/app/study-dropdown.html'), loadOptions);
+                } else {
+                    loadOptions.query = { glass: 'true' };
+                    studyDropdown.loadFile(path.join(__dirname, '../ui/app/study-dropdown.html'), loadOptions);
+                    studyDropdown.webContents.once('did-finish-load', () => {
+                        const viewId = liquidGlass.addView(studyDropdown.getNativeWindowHandle());
+                        if (viewId !== -1) {
+                            liquidGlass.unstable_setVariant(viewId, liquidGlass.GlassMaterialVariant.bubbles);
+                        }
+                    });
+                }
+
+                windowPool.set('study-dropdown', studyDropdown);
+                if (!app.isPackaged) {
+                    studyDropdown.webContents.openDevTools({ mode: 'detach' });
+                }
+                console.log('[WindowManager] Study dropdown window created successfully');
+                break;
+            }
         }
     };
 
@@ -639,7 +710,7 @@ function createFeatureWindows(header, namesToCreate) {
 }
 
 function destroyFeatureWindows() {
-    const featureWindows = ['listen','ask','settings','shortcut-settings'];
+    const featureWindows = ['listen','ask','settings','shortcut-settings','study-dropdown'];
     if (settingsHideTimer) {
         clearTimeout(settingsHideTimer);
         settingsHideTimer = null;
@@ -669,7 +740,7 @@ function getCurrentDisplay(window) {
 
 function createWindows() {
     const HEADER_HEIGHT        = 47;
-    const DEFAULT_WINDOW_WIDTH = 353;
+    const DEFAULT_WINDOW_WIDTH = 800;
 
     const primaryDisplay = screen.getPrimaryDisplay();
     const { y: workAreaY, width: screenWidth } = primaryDisplay.workArea;
@@ -746,7 +817,7 @@ function createWindows() {
     setupWindowController(windowPool, layoutManager, movementManager);
 
     if (currentHeaderState === 'main') {
-        createFeatureWindows(header, ['listen', 'ask', 'settings', 'shortcut-settings']);
+        createFeatureWindows(header, ['listen', 'ask', 'settings', 'shortcut-settings', 'study-dropdown']);
     }
 
     header.setContentProtection(isContentProtectionOn);

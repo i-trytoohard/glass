@@ -228,8 +228,8 @@ class HeaderTransitionManager {
 
     async _resizeForMain() {
         if (!window.api) return;
-        console.log('[HeaderController] _resizeForMain: Resizing window to 353x47');
-        return window.api.headerController.resizeHeaderWindow({ width: 353, height: 47 }).catch(() => {});
+        console.log('[HeaderController] _resizeForMain: Resizing window to 800x47 for research interface');
+        return window.api.headerController.resizeHeaderWindow({ width: 800, height: 47 }).catch(() => {});
     }
 
     async _resizeForApiKey(height = 370) {

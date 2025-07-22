@@ -114,16 +114,23 @@ contextBridge.exposeInMainWorld('api', {
     
     // Generic invoke (for dynamic channel names)
     // invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
-    sendListenButtonClick: (listenButtonText) => ipcRenderer.invoke('listen:changeSession', listenButtonText),
-    sendAskButtonClick: () => ipcRenderer.invoke('ask:toggleAskButton'),
+    sendListenButtonClick: () => ipcRenderer.invoke('main-header:listen-button-clicked'),
+    sendAskButtonClick: () => ipcRenderer.invoke('main-header:ask-button-clicked'),
     sendResearchButtonClick: () => ipcRenderer.invoke('research:navigate-to-research'),
-    sendToggleAllWindowsVisibility: () => ipcRenderer.invoke('shortcut:toggleAllWindowsVisibility'),
+    sendToggleAllWindowsVisibility: () => ipcRenderer.invoke('main-header:toggle-all-windows-visibility'),
+    showSettingsWindow: () => ipcRenderer.invoke('main-header:show-settings-window'),
+    hideSettingsWindow: () => ipcRenderer.invoke('main-header:hide-settings-window'),
+    showStudyDropdown: (show, studies) => ipcRenderer.invoke('main-header:show-study-dropdown', { show, studies }),
     
     // Listeners
     onListenChangeSessionResult: (callback) => ipcRenderer.on('listen:changeSessionResult', callback),
     removeOnListenChangeSessionResult: (callback) => ipcRenderer.removeListener('listen:changeSessionResult', callback),
     onShortcutsUpdated: (callback) => ipcRenderer.on('shortcuts-updated', callback),
     removeOnShortcutsUpdated: (callback) => ipcRenderer.removeListener('shortcuts-updated', callback)
+  },
+
+  studyDropdown: {
+    selectStudy: (study) => ipcRenderer.invoke('study-dropdown:select-study', study),
   },
 
   // src/ui/app/PermissionHeader.js
@@ -310,21 +317,33 @@ contextBridge.exposeInMainWorld('api', {
     // Study Management
     createStudy: (studyData) => ipcRenderer.invoke('research:create-study', studyData),
     getAllStudies: () => ipcRenderer.invoke('research:get-all-studies'),
+    getAvailableStudies: () => ipcRenderer.invoke('research:getAvailableStudies'),
     getStudy: (studyId) => ipcRenderer.invoke('research:get-study', studyId),
+    getLocalStudy: (studyId) => ipcRenderer.invoke('research:getLocalStudy', studyId),
     updateStudy: (studyId, updateData) => ipcRenderer.invoke('research:update-study', { studyId, updateData }),
     deleteStudy: (studyId) => ipcRenderer.invoke('research:delete-study', studyId),
 
     // Question Management  
     addQuestion: (studyId, questionData) => ipcRenderer.invoke('research:add-question', { studyId, questionData }),
     getStudyQuestions: (studyId) => ipcRenderer.invoke('research:get-study-questions', studyId),
+    getLocalStudyQuestions: (studyId) => ipcRenderer.invoke('research:getLocalStudyQuestions', studyId),
     updateQuestion: (questionId, updateData) => ipcRenderer.invoke('research:update-question', { questionId, updateData }),
     deleteQuestion: (questionId) => ipcRenderer.invoke('research:delete-question', questionId),
 
     // Session Management
     startSession: (studyId, participantData) => ipcRenderer.invoke('research:start-session', { studyId, participantData }),
+    startResearchSession: (studyId, participantData) => ipcRenderer.invoke('research:startResearchSession', studyId, participantData),
+    pauseResearchSession: () => ipcRenderer.invoke('research:pauseResearchSession'),
+    resumeResearchSession: () => ipcRenderer.invoke('research:resumeResearchSession'),
+    stopResearchSession: () => ipcRenderer.invoke('research:stopResearchSession'),
     endSession: () => ipcRenderer.invoke('research:end-session'),
+    endResearchSession: () => ipcRenderer.invoke('research:endResearchSession'),
     getSessionStatus: () => ipcRenderer.invoke('research:get-session-status'),
     getSessionReport: (sessionId) => ipcRenderer.invoke('research:get-session-report', sessionId),
+
+    // Question Detection
+    processTranscript: (transcript, speaker) => ipcRenderer.invoke('research:processTranscript', transcript, speaker),
+    manualQuestionOverride: (questionId) => ipcRenderer.invoke('research:manualQuestionOverride', questionId),
 
     // Follow-up Question Management
     markFollowUpAsked: (questionId, response) => ipcRenderer.invoke('research:mark-followup-asked', { questionId, response }),
@@ -335,9 +354,35 @@ contextBridge.exposeInMainWorld('api', {
     onSessionEnded: (callback) => ipcRenderer.on('research:session-ended', callback),
     onAnalysisUpdate: (callback) => ipcRenderer.on('research:analysis-update', callback),
     onFollowUpExpired: (callback) => ipcRenderer.on('research:followup-expired', callback),
+    onInterviewStatusChanged: (callback) => ipcRenderer.on('research:interview-status-changed', callback),
+    
+    // Question Detection Events
+    onQuestionDetected: (callback) => ipcRenderer.on('research:question-detected', callback),
+    onCurrentQuestionChanged: (callback) => ipcRenderer.on('research:current-question-changed', callback),
+    onAmbiguousQuestionDetected: (callback) => ipcRenderer.on('research:ambiguous-question-detected', callback),
+    onOffScriptQuestionDetected: (callback) => ipcRenderer.on('research:off-script-question-detected', callback),
+    onQuestionDetectionUpdate: (callback) => ipcRenderer.on('research:question-detection-update', callback),
+    
     removeOnSessionStarted: (callback) => ipcRenderer.removeListener('research:session-started', callback),
     removeOnSessionEnded: (callback) => ipcRenderer.removeListener('research:session-ended', callback),
     removeOnAnalysisUpdate: (callback) => ipcRenderer.removeListener('research:analysis-update', callback),
-    removeOnFollowUpExpired: (callback) => ipcRenderer.removeListener('research:followup-expired', callback)
+    removeOnFollowUpExpired: (callback) => ipcRenderer.removeListener('research:followup-expired', callback),
+    removeOnInterviewStatusChanged: (callback) => ipcRenderer.removeListener('research:interview-status-changed', callback),
+    
+    // Remove Question Detection Event Listeners
+    removeOnQuestionDetected: (callback) => ipcRenderer.removeListener('research:question-detected', callback),
+    removeOnCurrentQuestionChanged: (callback) => ipcRenderer.removeListener('research:current-question-changed', callback),
+    removeOnAmbiguousQuestionDetected: (callback) => ipcRenderer.removeListener('research:ambiguous-question-detected', callback),
+    removeOnOffScriptQuestionDetected: (callback) => ipcRenderer.removeListener('research:off-script-question-detected', callback),
+    removeOnQuestionDetectionUpdate: (callback) => ipcRenderer.removeListener('research:question-detection-update', callback)
+  }
+});
+
+// Expose electronAPI for direct IPC event handling
+contextBridge.exposeInMainWorld('electronAPI', {
+  ipcRenderer: {
+    on: (channel, callback) => ipcRenderer.on(channel, callback),
+    removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
+    send: (channel, ...args) => ipcRenderer.send(channel, ...args)
   }
 });

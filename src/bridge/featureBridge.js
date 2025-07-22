@@ -14,10 +14,22 @@ const listenService = require('../features/listen/listenService');
 const permissionService = require('../features/common/services/permissionService');
 const encryptionService = require('../features/common/services/encryptionService');
 const researchService = require('../features/research/researchService');
+const windowManager = require('../window/windowManager');
 
 module.exports = {
   // Renderer로부터의 요청을 수신하고 서비스로 전달
   initialize() {
+    // Main Header Actions
+    ipcMain.handle('main-header:toggle-all-windows-visibility', async () => {
+      return await shortcutsService.toggleAllWindowsVisibility();
+    });
+    ipcMain.handle('main-header:show-settings-window', async () => {
+      return windowManager.showSettingsWindow();
+    });
+    ipcMain.handle('main-header:hide-settings-window', async () => {
+      return windowManager.hideSettingsWindow();
+    });
+
     // Settings Service
     ipcMain.handle('settings:getPresets', async () => await settingsService.getPresets());
     ipcMain.handle('settings:get-auto-update', async () => await settingsService.getAutoUpdateSetting());
@@ -153,6 +165,47 @@ module.exports = {
         internalBridge.emit('window:requestNavigation', { view: 'toggle-research' });
     });
 
+    // Study dropdown handlers
+    ipcMain.handle('main-header:show-study-dropdown', async (event, { show, studies = [] }) => {
+        console.log('[FeatureBridge] Show study dropdown:', show, 'with', studies.length, 'studies');
+        
+        if (show) {
+            // Send studies to the dropdown window
+            const dropdownWin = BrowserWindow.getAllWindows().find(win => 
+                win.webContents.getURL().includes('study-dropdown.html')
+            );
+            
+            if (dropdownWin && !dropdownWin.isDestroyed()) {
+                dropdownWin.webContents.send('update-studies', studies);
+            }
+        }
+        
+        // Show/hide the dropdown window
+        internalBridge.emit('window:requestVisibility', { 
+            name: 'study-dropdown', 
+            visible: show 
+        });
+    });
+
+    ipcMain.handle('study-dropdown:select-study', async (event, study) => {
+        console.log('[FeatureBridge] Study selected from dropdown:', study.title);
+        
+        // Send study selection to the main header window
+        const headerWin = BrowserWindow.getAllWindows().find(win => 
+            win.webContents.getURL().includes('header.html')
+        );
+        
+        if (headerWin && !headerWin.isDestroyed()) {
+            headerWin.webContents.send('study-selected', study);
+        }
+        
+        // Hide the dropdown after selection
+        internalBridge.emit('window:requestVisibility', { 
+            name: 'study-dropdown', 
+            visible: false 
+        });
+    });
+
     // LocalAIManager 이벤트를 모든 윈도우에 브로드캐스트
     localAIManager.on('install-progress', (service, data) => {
       const event = { service, ...data };
@@ -205,8 +258,16 @@ module.exports = {
 
     // ResearchService 이벤트를 모든 윈도우에 브로드캐스트
     researchService.on('session-started', (data) => {
-      BrowserWindow.getAllWindows().forEach(win => {
+      console.log('[FeatureBridge] Broadcasting session-started event to all windows:', {
+        studyId: data.studyId,
+        studyTitle: data.study?.title || 'No study',
+        hasStudy: !!data.study,
+        windowCount: BrowserWindow.getAllWindows().length
+      });
+      
+      BrowserWindow.getAllWindows().forEach((win, index) => {
         if (win && !win.isDestroyed()) {
+          console.log(`[FeatureBridge] Sending session-started to window ${index}:`, win.getTitle() || 'Untitled');
           win.webContents.send('research:session-started', data);
         }
       });
@@ -231,6 +292,52 @@ module.exports = {
           win.webContents.send('research:followup-expired', data);
         }
       });
+    });
+
+    // Question detection events
+    researchService.on('question-detected', (data) => {
+        console.log('[FeatureBridge] Broadcasting question-detected event:', data);
+        BrowserWindow.getAllWindows().forEach((win) => {
+            if (win && !win.isDestroyed()) {
+                win.webContents.send('research:question-detected', data);
+            }
+        });
+    });
+
+    researchService.on('current-question-changed', (data) => {
+        console.log('[FeatureBridge] Broadcasting current-question-changed event:', data);
+        BrowserWindow.getAllWindows().forEach((win) => {
+            if (win && !win.isDestroyed()) {
+                win.webContents.send('research:current-question-changed', data);
+            }
+        });
+    });
+
+    researchService.on('ambiguous-question-detected', (data) => {
+        console.log('[FeatureBridge] Broadcasting ambiguous-question-detected event:', data);
+        BrowserWindow.getAllWindows().forEach((win) => {
+            if (win && !win.isDestroyed()) {
+                win.webContents.send('research:ambiguous-question-detected', data);
+            }
+        });
+    });
+
+    researchService.on('off-script-question-detected', (data) => {
+        console.log('[FeatureBridge] Broadcasting off-script-question-detected event:', data);
+        BrowserWindow.getAllWindows().forEach((win) => {
+            if (win && !win.isDestroyed()) {
+                win.webContents.send('research:off-script-question-detected', data);
+            }
+        });
+    });
+
+    researchService.on('question-detection-update', (data) => {
+        console.log('[FeatureBridge] Broadcasting question-detection-update event:', data);
+        BrowserWindow.getAllWindows().forEach((win) => {
+            if (win && !win.isDestroyed()) {
+                win.webContents.send('research:question-detection-update', data);
+            }
+        });
     });
 
     // ModelStateService 이벤트를 모든 윈도우에 브로드캐스트
@@ -290,6 +397,156 @@ module.exports = {
     // 전체 상태 조회
     ipcMain.handle('localai:get-all-states', async (event) => {
       return await localAIManager.getAllServiceStates();
+    });
+
+    // Research Service
+    ipcMain.handle('research:getAvailableStudies', async () => {
+      try {
+        return await researchService.getStudies();
+      } catch (error) {
+        console.error('[FeatureBridge] research:getAvailableStudies failed', error.message);
+        return [];
+      }
+    });
+
+    ipcMain.handle('research:getLocalStudy', async (event, studyId) => {
+      try {
+        return await researchService.getLocalStudy(studyId);
+      } catch (error) {
+        console.error('[FeatureBridge] research:getLocalStudy failed', error.message);
+        return null;
+      }
+    });
+
+    ipcMain.handle('research:getLocalStudyQuestions', async (event, studyId) => {
+      try {
+        return await researchService.getLocalStudyQuestions(studyId);
+      } catch (error) {
+        console.error('[FeatureBridge] research:getLocalStudyQuestions failed', error.message);
+        return [];
+      }
+    });
+
+    ipcMain.handle('research:startResearchSession', async (event, studyId) => {
+      try {
+        console.log('[FeatureBridge] Starting research session for study:', studyId);
+        await researchService.startResearchSession(studyId);
+        
+        // Emit status change event
+        BrowserWindow.getAllWindows().forEach(window => {
+          window.webContents.send('research:interview-status-changed', { 
+            success: true, 
+            status: 'started', 
+            studyId 
+          });
+        });
+        
+        return { success: true };
+      } catch (error) {
+        console.error('[FeatureBridge] research:startResearchSession failed', error.message);
+        
+        // Emit failure event
+        BrowserWindow.getAllWindows().forEach(window => {
+          window.webContents.send('research:interview-status-changed', { 
+            success: false, 
+            error: error.message 
+          });
+        });
+        
+        return { success: false, error: error.message };
+      }
+    });
+
+    ipcMain.handle('research:pauseResearchSession', async () => {
+      try {
+        console.log('[FeatureBridge] Pausing research session');
+        await researchService.pauseResearchSession();
+        
+        // Emit status change event
+        BrowserWindow.getAllWindows().forEach(window => {
+          window.webContents.send('research:interview-status-changed', { 
+            success: true, 
+            status: 'paused' 
+          });
+        });
+        
+        return { success: true };
+      } catch (error) {
+        console.error('[FeatureBridge] research:pauseResearchSession failed', error.message);
+        return { success: false, error: error.message };
+      }
+    });
+
+    ipcMain.handle('research:resumeResearchSession', async () => {
+      try {
+        console.log('[FeatureBridge] Resuming research session');
+        await researchService.resumeResearchSession();
+        
+        // Emit status change event
+        BrowserWindow.getAllWindows().forEach(window => {
+          window.webContents.send('research:interview-status-changed', { 
+            success: true, 
+            status: 'resumed' 
+          });
+        });
+        
+        return { success: true };
+      } catch (error) {
+        console.error('[FeatureBridge] research:resumeResearchSession failed', error.message);
+        return { success: false, error: error.message };
+      }
+    });
+
+    ipcMain.handle('research:endResearchSession', async () => {
+      try {
+        console.log('[FeatureBridge] Ending research session');
+        await researchService.endResearchSession();
+        
+        // Emit status change event
+        BrowserWindow.getAllWindows().forEach(window => {
+          window.webContents.send('research:interview-status-changed', { 
+            success: true, 
+            status: 'ended' 
+          });
+        });
+        
+        return { success: true };
+      } catch (error) {
+        console.error('[FeatureBridge] research:endResearchSession failed', error.message);
+        return { success: false, error: error.message };
+      }
+    });
+
+    // Question detection IPC handlers
+    ipcMain.handle('research:processTranscript', async (event, transcript, speaker) => {
+        try {
+            await researchService.processTranscript(transcript, speaker);
+            return { success: true };
+        } catch (error) {
+            console.error('[FeatureBridge] Error processing transcript:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('research:manualQuestionOverride', async (event, questionId) => {
+        try {
+            researchService.manualQuestionOverride(questionId);
+            return { success: true };
+        } catch (error) {
+            console.error('[FeatureBridge] Error in manual question override:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
+    // Stop research session
+    ipcMain.handle('research:stopResearchSession', async (event) => {
+        try {
+            const result = await researchService.stopResearchSession();
+            return { success: true, stopped: result };
+        } catch (error) {
+            console.error('[FeatureBridge] Error stopping research session:', error);
+            return { success: false, error: error.message };
+        }
     });
 
     console.log('[FeatureBridge] Initialized with all feature handlers.');

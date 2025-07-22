@@ -52,13 +52,38 @@ class SttService {
         this.onStatusUpdate = onStatusUpdate;
     }
 
-    sendToRenderer(channel, data) {
-        // Listen 관련 이벤트는 Listen 윈도우에만 전송 (Ask 윈도우 충돌 방지)
-        const { windowPool } = require('../../../window/windowManager');
-        const listenWindow = windowPool?.get('listen');
+    sendToRenderer(eventName, data) {
+        BrowserWindow.getAllWindows().forEach(win => {
+            if (win && !win.isDestroyed()) {
+                win.webContents.send(eventName, data);
+            }
+        });
         
-        if (listenWindow && !listenWindow.isDestroyed()) {
-            listenWindow.webContents.send(channel, data);
+        // Forward transcripts to research service for question detection
+        if (eventName === 'stt-update' && data.text && data.text.trim()) {
+            this.forwardToQuestionDetection(data);
+        }
+    }
+
+    /**
+     * Forward transcript to research service for question detection
+     * @param {Object} transcriptData - STT update data
+     */
+    forwardToQuestionDetection(transcriptData) {
+        try {
+            // Import research service directly like featureBridge does
+            const researchService = require('../../research/researchService');
+            
+            // Determine speaker - for now assume "Them" is moderator
+            const speaker = transcriptData.speaker === 'Them' ? 'moderator' : 'participant';
+            
+            // Only forward if it's a final transcription (not partial)
+            if (!transcriptData.isPartial && transcriptData.isFinal) {
+                researchService.processTranscript(transcriptData.text, speaker);
+            }
+        } catch (error) {
+            // Silently handle error to avoid breaking STT service
+            console.log('[SttService] Could not forward to question detection:', error.message);
         }
     }
 

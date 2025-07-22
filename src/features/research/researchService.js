@@ -10,6 +10,8 @@ const questionResponseRepository = require('./repositories/questionResponse');
 const researchSessionRepository = require('./repositories/researchSession');
 const sessionRepository = require('../common/repositories/session');
 const internalBridge = require('../../bridge/internalBridge');
+const { localStudiesRepository } = require('../common/repositories/localStudies');
+const QuestionDetectionService = require('./questionDetectionService');
 
 // Utility functions
 function tsSec() { 
@@ -25,8 +27,18 @@ function concatClean(a, b) {
 class ResearchService extends EventEmitter {
     constructor() {
         super();
+        this.mode = 'manual'; // 'interviewer-driven' | 'manual'
         this.currentStudy = null;
         this.currentSession = null;
+        this.activeQuestions = new Map(); // questionId -> questionData
+        this.questionStatus = new Map(); // questionId -> 'pending' | 'in_progress' | 'completed'
+        this.responses = new Map(); // questionId -> responseData
+        this.insights = new Map(); // questionId -> insightData
+        
+        // Question detection service
+        this.questionDetectionService = new QuestionDetectionService();
+        this.setupQuestionDetectionEvents();
+        
         this.activeQuestions = new Map(); // questionId -> question data
         this.questionResponses = new Map(); // questionId -> response data
         this.transcriptBuffer = []; // Recent transcript segments for analysis
@@ -76,6 +88,101 @@ class ResearchService extends EventEmitter {
         return this._listenService;
     }
 
+    /**
+     * Set up event listeners for question detection service
+     */
+    setupQuestionDetectionEvents() {
+        this.questionDetectionService.on('question-detected', (data) => {
+            console.log('[ResearchService] Question detected:', data);
+            this._handleQuestionDetected(data);
+            
+            // Forward to all listeners (UI, etc.)
+            this.emit('question-detected', data);
+        });
+
+        this.questionDetectionService.on('detection-started', (data) => {
+            console.log('[ResearchService] Question detection started:', data);
+            this.emit('detection-started', data);
+        });
+
+        this.questionDetectionService.on('detection-stopped', () => {
+            console.log('[ResearchService] Question detection stopped');
+            this.emit('detection-stopped');
+        });
+    }
+
+    /**
+     * Handle detected questions from the detection service
+     * @param {Object} detectionData - Question detection event data
+     */
+    _handleQuestionDetected(detectionData) {
+        const { type, questionId, text, score, confidence } = detectionData;
+
+        console.log('[ResearchService] Processing detected question:', {
+            type, questionId, text, score, confidence
+        });
+
+        switch (type) {
+            case 'scripted':
+                if (questionId && this.activeQuestions.has(questionId)) {
+                    // Mark question as in progress
+                    this.questionStatus.set(questionId, 'in_progress');
+                    console.log(`[ResearchService] Marked scripted question ${questionId} as in_progress`);
+                    
+                    // Emit current question change
+                    this.emit('current-question-changed', {
+                        questionId,
+                        question: this.activeQuestions.get(questionId),
+                        detectionData
+                    });
+                }
+                break;
+
+            case 'ambiguous':
+                console.log(`[ResearchService] Ambiguous question detected (score: ${score})`);
+                // Could emit to UI for manual clarification
+                this.emit('ambiguous-question-detected', detectionData);
+                break;
+
+            case 'off_script':
+                console.log(`[ResearchService] Off-script question detected: "${text}"`);
+                // Track off-script questions for analysis
+                this.emit('off-script-question-detected', detectionData);
+                break;
+        }
+
+        // Always emit the raw detection for UI display
+        this.emit('question-detection-update', {
+            type,
+            questionId,
+            text,
+            score,
+            confidence,
+            timestamp: detectionData.utc
+        });
+    }
+
+    /**
+     * Process incoming transcript for question detection
+     * @param {string} transcript - Audio transcript
+     * @param {string} speaker - Speaker identification
+     */
+    async processTranscript(transcript, speaker = 'moderator') {
+        if (this.questionDetectionService.isActive) {
+            await this.questionDetectionService.processTranscript(transcript, speaker);
+        }
+    }
+
+    /**
+     * Manual override for current question (keyboard shortcut support)
+     * @param {string} questionId - Question ID to set as current
+     */
+    manualQuestionOverride(questionId) {
+        if (this.questionDetectionService.isActive) {
+            this.questionDetectionService.manualOverride(questionId);
+        }
+    }
+
     // ==================== STUDY MANAGEMENT ====================
     
     async createStudy(studyData) {
@@ -103,6 +210,21 @@ class ResearchService extends EventEmitter {
         await researchStudyRepository.create(study);
         console.log(`[ResearchService] Created study: ${studyId}`);
         return study;
+    }
+
+    // Alias method for consistency with bridge
+    async getStudies() {
+        // Return local studies for dropdown selection
+        // Later this will be replaced with API calls
+        return localStudiesRepository.getAllStudies();
+    }
+
+    async getLocalStudy(studyId) {
+        return localStudiesRepository.getStudyById(studyId);
+    }
+
+    async getLocalStudyQuestions(studyId) {
+        return localStudiesRepository.getStudyQuestions(studyId);
     }
 
     async updateStudy(studyId, updateData) {
@@ -197,39 +319,90 @@ class ResearchService extends EventEmitter {
     // ==================== RESEARCH SESSION MANAGEMENT ====================
     
     async startResearchSession(studyId, participantData = {}) {
+        console.log('[ResearchService] Starting research session with studyId:', studyId);
+        
         // Get or create a regular session
         const sessionId = await sessionRepository.getOrCreateActive('research');
         await sessionRepository.updateType(sessionId, 'research');
+        console.log('[ResearchService] Session created/retrieved:', sessionId);
         
-        // Load study and questions
-        this.currentStudy = await this.getStudy(studyId);
-        if (!this.currentStudy) {
-            throw new Error(`Study not found: ${studyId}`);
-        }
-        
-        const questions = await this.getStudyQuestions(studyId);
-        this.activeQuestions.clear();
-        this.questionResponses.clear();
-        
-        questions.forEach(question => {
-            this.activeQuestions.set(question.id, question);
-            this.questionResponses.set(question.id, {
-                id: crypto.randomUUID(),
-                session_id: sessionId,
-                question_id: question.id,
-                status: 'not_asked',
-                completeness_score: 0.0,
-                ai_confidence: 0.0,
-                follow_up_needed: 0,
-                // New fields for interviewer-driven detection
-                summarized_answer: '',
-                max_completeness: 0.0,
-                needs_clarification_flag: 0,
-                last_model_score: 0.0,
-                created_at: tsSec(),
-                updated_at: tsSec()
-            });
+        // Load study from local repository first, fallback to database
+        let study = localStudiesRepository.getStudyById(studyId);
+        console.log('[ResearchService] Local study lookup result:', {
+            found: !!study,
+            studyId: studyId,
+            studyTitle: study?.title || 'Not found'
         });
+        
+        if (study) {
+            console.log('[ResearchService] Using local study:', study.title);
+            this.currentStudy = study;
+            console.log('[ResearchService] Set currentStudy:', {
+                id: this.currentStudy.id,
+                title: this.currentStudy.title,
+                hasQuestions: !!this.currentStudy.questions,
+                questionCount: this.currentStudy.questions?.length || 0
+            });
+            
+            // Load questions from local study
+            const questions = localStudiesRepository.getStudyQuestions(studyId);
+            console.log('[ResearchService] Loaded questions from local study:', questions.length);
+            
+            this.activeQuestions.clear();
+            this.questionResponses.clear();
+            
+            questions.forEach(question => {
+                this.activeQuestions.set(question.id, question);
+                this.questionResponses.set(question.id, {
+                    id: crypto.randomUUID(),
+                    session_id: sessionId,
+                    question_id: question.id,
+                    status: 'not_asked',
+                    completeness_score: 0.0,
+                    ai_confidence: 0.0,
+                    follow_up_needed: 0,
+                    // New fields for interviewer-driven detection
+                    summarized_answer: '',
+                    max_completeness: 0.0,
+                    needs_clarification_flag: 0,
+                    last_model_score: 0.0,
+                    created_at: tsSec(),
+                    updated_at: tsSec()
+                });
+            });
+        } else {
+            // Fallback to database study (existing logic)
+            console.log('[ResearchService] Using database study');
+            this.currentStudy = await this.getStudy(studyId);
+            if (!this.currentStudy) {
+                throw new Error(`Study not found: ${studyId}`);
+            }
+            
+            const questions = await this.getStudyQuestions(studyId);
+            console.log('[ResearchService] Loaded questions from database study:', questions.length);
+            this.activeQuestions.clear();
+            this.questionResponses.clear();
+            
+            questions.forEach(question => {
+                this.activeQuestions.set(question.id, question);
+                this.questionResponses.set(question.id, {
+                    id: crypto.randomUUID(),
+                    session_id: sessionId,
+                    question_id: question.id,
+                    status: 'not_asked',
+                    completeness_score: 0.0,
+                    ai_confidence: 0.0,
+                    follow_up_needed: 0,
+                    // New fields for interviewer-driven detection
+                    summarized_answer: '',
+                    max_completeness: 0.0,
+                    needs_clarification_flag: 0,
+                    last_model_score: 0.0,
+                    created_at: tsSec(),
+                    updated_at: tsSec()
+                });
+            });
+        }
         
         // Create research session record
         this.currentSession = {
@@ -246,6 +419,7 @@ class ResearchService extends EventEmitter {
         };
         
         await researchSessionRepository.create(this.currentSession);
+        console.log('[ResearchService] Research session record created:', this.currentSession.session_id);
         
         // Start live analysis
         this.isLiveAnalysisActive = true;
@@ -289,10 +463,39 @@ class ResearchService extends EventEmitter {
             // Don't fail the research session if listen service fails
         }
         
-        console.log(`[ResearchService] Started research session for study: ${studyId}`);
+        // Start the session
+        console.log(`[ResearchService] Research session started for study: ${studyId}`);
+
+        // Start question detection with study questions
+        if (this.currentStudy && this.currentStudy.questions) {
+            console.log('[ResearchService] Starting question detection with', this.currentStudy.questions.length, 'questions');
+            try {
+                await this.questionDetectionService.startDetection(this.currentStudy.questions);
+            } catch (error) {
+                console.error('[ResearchService] Failed to start question detection:', error);
+                // Continue without question detection if it fails
+            }
+        }
+
+        // Prepare session data to emit
+        const sessionData = { 
+            studyId, 
+            sessionId, 
+            questionsCount: this.activeQuestions.size, // Use activeQuestions.size instead of undefined questions.length
+            study: this.currentStudy // Include the full study object
+        };
+        
+        console.log('[ResearchService] Emitting session-started event with data:', {
+            studyId: sessionData.studyId,
+            sessionId: sessionData.sessionId,
+            questionsCount: sessionData.questionsCount,
+            studyTitle: sessionData.study?.title || 'No study',
+            studyHasQuestions: !!sessionData.study?.questions,
+            studyQuestionCount: sessionData.study?.questions?.length || 0
+        });
         
         // Emit initial status with first question ready
-        this.emit('session-started', { studyId, sessionId, questionsCount: questions.length });
+        this.emit('session-started', sessionData);
         
         // Emit initial analysis update to show first question
         setTimeout(() => {
@@ -310,6 +513,71 @@ class ResearchService extends EventEmitter {
             questions: Array.from(this.activeQuestions.values()),
             status: this.getSessionStatus()
         };
+    }
+
+    /**
+     * Stop the current research session
+     * @returns {boolean} Success status
+     */
+    async stopResearchSession() {
+        if (!this.currentSession) {
+            console.log('[ResearchService] No active session to stop');
+            return false;
+        }
+
+        console.log('[ResearchService] Stopping research session:', this.currentSession);
+
+        try {
+            // Stop question detection
+            this.questionDetectionService.stopDetection();
+
+            // End session in database
+            const sessionRepo = require('../common/repositories/session'); // Assuming getSessionRepository is in session.js
+            await sessionRepo.endSession(this.currentSession.session_id, {
+                questions_completed: Array.from(this.questionStatus.entries())
+                    .filter(([_, status]) => status === 'completed').length,
+                total_questions: this.activeQuestions.size,
+                completion_percentage: this.getCompletionPercentage()
+            });
+
+            console.log('[ResearchService] Research session stopped successfully');
+
+            const stoppedSessionId = this.currentSession.session_id;
+            const stoppedStudyId = this.currentStudy?.id;
+
+            // Reset state
+            this.currentSession = null;
+            this.currentStudy = null;
+            this.activeQuestions.clear();
+            this.questionStatus.clear();
+            this.responses.clear();
+            this.insights.clear();
+
+            // Emit session ended
+            this.emit('session-ended', {
+                sessionId: stoppedSessionId,
+                studyId: stoppedStudyId
+            });
+
+            return true;
+
+        } catch (error) {
+            console.error('[ResearchService] Error stopping research session:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get completion percentage for the current session
+     * @returns {number} Percentage (0-100)
+     */
+    getCompletionPercentage() {
+        if (this.activeQuestions.size === 0) return 0;
+        
+        const completedCount = Array.from(this.questionStatus.entries())
+            .filter(([_, status]) => status === 'completed').length;
+        
+        return Math.round((completedCount / this.activeQuestions.size) * 100);
     }
 
     async endResearchSession() {
@@ -360,12 +628,77 @@ class ResearchService extends EventEmitter {
         // Dump session metrics
         this._dumpSessionMetrics();
         
-        this.emit('session-ended', this.getSessionStatus());
-        
-        this.currentSession = null;
+        // Reset state
         this.currentStudy = null;
+        this.currentSession = null;
         this.activeQuestions.clear();
         this.questionResponses.clear();
+        this.transcriptBuffer = [];
+        this.bestFollowUpQuestions = [];
+        this.displayedFollowUpQuestions = [];
+        
+        this.emit('session-ended');
+    }
+
+    async pauseResearchSession() {
+        if (!this.currentSession) {
+            throw new Error('No active research session to pause');
+        }
+
+        try {
+            console.log('[ResearchService] Pausing research session...');
+            
+            // Stop audio capture but keep session data
+            const listenService = this._getListenService();
+            await listenService.stopMacOSAudioCapture();
+            
+            // Stop live analysis
+            this.isLiveAnalysisActive = false;
+            this.pendingAnalysis = false;
+            
+            // Update session status
+            await researchSessionRepository.update(this.currentSession.session_id, {
+                research_mode: 'paused'
+            });
+            
+            console.log('[ResearchService] Research session paused successfully');
+            this.emit('session-paused');
+            
+        } catch (error) {
+            console.error('[ResearchService] Failed to pause research session:', error);
+            throw error;
+        }
+    }
+
+    async resumeResearchSession() {
+        if (!this.currentSession) {
+            throw new Error('No research session to resume');
+        }
+
+        try {
+            console.log('[ResearchService] Resuming research session...');
+            
+            // Restart audio capture
+            const listenService = this._getListenService();
+            await listenService.startMacOSAudioCapture();
+            
+            // Restart live analysis
+            this.isLiveAnalysisActive = true;
+            this.lastAnalysisTime = Date.now();
+            this.pendingAnalysis = false;
+            
+            // Update session status
+            await researchSessionRepository.update(this.currentSession.session_id, {
+                research_mode: 'live'
+            });
+            
+            console.log('[ResearchService] Research session resumed successfully');
+            this.emit('session-resumed');
+            
+        } catch (error) {
+            console.error('[ResearchService] Failed to resume research session:', error);
+            throw error;
+        }
     }
 
     // ==================== LIVE ANALYSIS ====================
@@ -377,6 +710,14 @@ class ResearchService extends EventEmitter {
         }
         
         console.log(`[ResearchService] Processing transcript: ${speaker} - ${text.substring(0, 50)}...`);
+        
+        // Forward to question detection service as well
+        if (this.questionDetectionService.isActive) {
+            console.log('[ResearchService] Forwarding to question detection service:', { text: text.substring(0, 50), speaker });
+            await this.questionDetectionService.processTranscript(text, speaker === 'Me' ? 'moderator' : 'participant');
+        } else {
+            console.log('[ResearchService] Question detection service not active, skipping forwarding');
+        }
         
         // Add to transcript buffer
         this.transcriptBuffer.push({
@@ -552,21 +893,38 @@ Methodology: ${this.currentStudy.methodology}
 QUESTIONS TO TRACK:
 ${questions.map(q => `- ${q.id}: [${q.category}] ${q.text} (Current status: ${q.status})`).join('\n')}
 
+CRITICAL VALIDATION RULES:
+1. ONLY update a question's status if there is CLEAR EVIDENCE that:
+   - The interviewer actually asked a question related to the research question
+   - The participant provided a meaningful response (not just garbled text or fragments)
+   - The transcript is coherent and readable (not corrupted STT output)
+
+2. DO NOT update status for:
+   - Garbled or incoherent text (e.g., "current.txt Canara iscribe")
+   - Single words or fragments without context
+   - Text that appears to be STT transcription errors
+   - Cases where no clear question-answer exchange occurred
+
 CRITICAL ID RULE: For each question above, I show id=(uuid). In your question_updates array, you MUST use that exact UUID string in the questionId field. Copy/paste exactly from the list above - do not shorten, truncate, or renumber. Any questionId that doesn't exactly match will be ignored.
 
 ANALYSIS GUIDELINES:
-1. Question Status Mapping:
-   - "not_asked": Question hasn't been addressed yet
-   - "partial": Question only briefly touched on or response was very vague (use sparingly)
-   - "complete": Question adequately answered - participant provided a response that addresses the core question (be generous with this)
+1. Question Status Mapping (BE CONSERVATIVE):
+   - "not_asked": Question hasn't been addressed yet OR transcript is unclear/garbled
+   - "partial": Question clearly asked and participant gave a brief but coherent response
+   - "complete": Question clearly asked and adequately answered with sufficient detail
    - "needs_clarification": Answer given but unclear or contradictory
 
-2. Completeness Scoring (0.0-1.0):
-   - Score conservatively - require substantial content that clearly addresses the question
-   - 0.3-0.5: Question touched on but response is vague or incomplete
-   - 0.6-0.8: Question adequately answered with relevant details
-   - 0.9+: Comprehensive answer with examples, context, or multiple aspects covered
-   - Only mark as "complete" when the participant has provided sufficient detail
+2. Completeness Scoring (0.0-1.0) - BE STRICT:
+   - Only give scores > 0.0 when you can clearly identify both a question being asked AND a coherent response
+   - 0.1-0.3: Question asked but response is very brief or vague (but still coherent)
+   - 0.4-0.6: Question asked and answered with some relevant details
+   - 0.7-0.9: Question asked and comprehensively answered
+   - NEVER score above 0.0 for garbled, incoherent, or fragmented text
+
+3. Transcript Quality Check:
+   - If the transcript appears garbled, corrupted, or nonsensical, do NOT update any question statuses
+   - Look for coherent sentence structure and logical conversation flow
+   - Reject updates for text like "current.txt Canara iscribe" or similar STT errors
 
 3. Follow-up Suggestions:
    - ONLY suggest follow-ups when the participant's response is incomplete, vague, or needs clarification
@@ -691,11 +1049,41 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
             const ignoredUpdates = analysis.question_updates.filter(update => 
                 update.questionId !== this.currentQuestionBeingAsked
             );
-            if (ignoredUpdates.length > 0) {
-                console.log(`[ResearchService] Ignoring ${ignoredUpdates.length} AI-suggested question switches; interviewer not detected`);
-            }
-        } else if (analysis.question_updates && !this.currentQuestionBeingAsked) {
+            console.log(`[ResearchService] Ignoring ${ignoredUpdates.length} AI-suggested question switches; interviewer not detected`);
+        } else {
             console.log(`[ResearchService] Ignoring AI updates - no active interviewer question`);
+            
+            // Fallback: Check if AI analysis suggests a question became active
+            if (analysis.question_updates && analysis.question_updates.length > 0) {
+                const activeUpdate = analysis.question_updates.find(update => 
+                    update.status === 'partial' || update.status === 'in_progress'
+                );
+                
+                if (activeUpdate && !this.currentQuestionBeingAsked) {
+                    console.log('[ResearchService] AI Fallback: Question appears to be active based on AI analysis');
+                    
+                    const question = this.activeQuestions.get(activeUpdate.questionId);
+                    if (question) {
+                        console.log(`[ResearchService] Setting question ${activeUpdate.questionId} as current via AI fallback`);
+                        
+                        // Set as current question
+                        this.currentQuestionBeingAsked = activeUpdate.questionId;
+                        
+                        // Emit current question changed event
+                        this.emit('current-question-changed', {
+                            questionId: activeUpdate.questionId,
+                            question: question,
+                            detectionData: {
+                                type: 'ai_fallback',
+                                score: 0.8, // High confidence since AI detected it
+                                confidence: 'high'
+                            }
+                        });
+                        
+                        console.log('[ResearchService] AI fallback question detection triggered');
+                    }
+                }
+            }
         }
         
         // Method 3: Handle participant responses for active question only

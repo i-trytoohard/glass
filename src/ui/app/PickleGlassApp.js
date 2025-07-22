@@ -7,6 +7,8 @@ import { ResearchView } from '../research/ResearchView.js';
 
 import '../listen/audioCore/renderer.js';
 
+console.log('[PickleGlassApp] Module loading - PickleGlassApp.js file being imported');
+
 export class PickleGlassApp extends LitElement {
     static styles = css`
         :host {
@@ -71,11 +73,19 @@ export class PickleGlassApp extends LitElement {
         this.selectedScreenshotInterval = localStorage.getItem('selectedScreenshotInterval') || '5';
         this.selectedImageQuality = localStorage.getItem('selectedImageQuality') || 'medium';
         this._isClickThrough = false;
-
     }
 
     connectedCallback() {
         super.connectedCallback();
+        console.log('[PickleGlassApp] Connected to DOM');
+        
+        // Listen for URL changes (popstate) and manual navigation
+        this._updateViewFromURL();
+        
+        // Set up periodic check for URL changes (since loadURL doesn't trigger popstate)
+        this._urlCheckInterval = setInterval(() => {
+            this._updateViewFromURL();
+        }, 100);
         
         if (window.api) {
             window.api.pickleGlassApp.onClickThroughToggled((_, isEnabled) => {
@@ -86,6 +96,9 @@ export class PickleGlassApp extends LitElement {
 
     disconnectedCallback() {
         super.disconnectedCallback();
+        if (this._urlCheckInterval) {
+            clearInterval(this._urlCheckInterval);
+        }
         if (window.api) {
             window.api.pickleGlassApp.removeAllClickThroughListeners();
         }
@@ -126,13 +139,23 @@ export class PickleGlassApp extends LitElement {
         }
     }
 
-
+    _updateViewFromURL() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const newView = urlParams.get('view') || 'listen';
+        
+        if (newView !== this.currentView) {
+            console.log('[PickleGlassApp] URL changed - updating view from', this.currentView, 'to', newView);
+            this.currentView = newView;
+            this.requestUpdate();
+        }
+    }
 
 
     render() {
         console.log('[PickleGlassApp] Rendering with currentView:', this.currentView);
         switch (this.currentView) {
             case 'listen':
+                console.log('[PickleGlassApp] Rendering listen-view');
                 return html`<listen-view
                     .currentResponseIndex=${this.currentResponseIndex}
                     .selectedProfile=${this.selectedProfile}
@@ -140,8 +163,10 @@ export class PickleGlassApp extends LitElement {
                     @response-index-changed=${e => (this.currentResponseIndex = e.detail.index)}
                 ></listen-view>`;
             case 'ask':
+                console.log('[PickleGlassApp] Rendering ask-view');
                 return html`<ask-view></ask-view>`;
             case 'settings':
+                console.log('[PickleGlassApp] Rendering settings-view');
                 return html`<settings-view
                     .selectedProfile=${this.selectedProfile}
                     .selectedLanguage=${this.selectedLanguage}
@@ -149,20 +174,26 @@ export class PickleGlassApp extends LitElement {
                     .onLanguageChange=${lang => (this.selectedLanguage = lang)}
                 ></settings-view>`;
             case 'shortcut-settings':
+                console.log('[PickleGlassApp] Rendering shortcut-settings-view');
                 return html`<shortcut-settings-view></shortcut-settings-view>`;
             case 'research':
+                console.log('[PickleGlassApp] Rendering research-view');
                 return html`<research-view></research-view>`;
             case 'history':
+                console.log('[PickleGlassApp] Rendering history-view');
                 return html`<history-view></history-view>`;
             case 'help':
+                console.log('[PickleGlassApp] Rendering help-view');
                 return html`<help-view></help-view>`;
             case 'setup':
+                console.log('[PickleGlassApp] Rendering setup-view');
                 return html`<setup-view></setup-view>`;
             default:
+                console.log('[PickleGlassApp] Unknown view:', this.currentView);
                 return html`<div>Unknown view: ${this.currentView}</div>`;
         }
     }
 }
 
+console.log('[PickleGlassApp] Defining custom element pickle-glass-app');
 customElements.define('pickle-glass-app', PickleGlassApp);
-customElements.define('research-view', ResearchView);

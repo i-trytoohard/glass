@@ -4,7 +4,13 @@ export class MainHeader extends LitElement {
     static properties = {
         isTogglingSession: { type: Boolean, state: true },
         shortcuts: { type: Object, state: true },
-        listenSessionStatus: { type: String, state: true },
+        // Research-specific properties
+        selectedStudy: { type: Object, state: true },
+        availableStudies: { type: Array, state: true },
+        interviewStatus: { type: String, state: true }, // 'idle', 'active', 'paused'
+        interviewStartTime: { type: Number, state: true },
+        interviewDuration: { type: Number, state: true },
+        showStudySelector: { type: Boolean, state: true },
     };
 
     static styles = css`
@@ -31,6 +37,20 @@ export class MainHeader extends LitElement {
             pointer-events: none;
         }
 
+        @keyframes slideUp {
+            0% { opacity: 1; transform: translateY(0px) scale(1); }
+            100% { opacity: 0; transform: translateY(-150%) scale(0.85); }
+        }
+
+        @keyframes slideDown {
+            0% { opacity: 0; transform: translateY(-150%) scale(0.85); }
+            100% { opacity: 1; transform: translateY(0px) scale(1); }
+        }
+
+        @keyframes fadeIn {
+            0% { opacity: 0; transform: scale(0.9); }
+            100% { opacity: 1; transform: scale(1); }
+        }
 
         * {
             font-family: 'Helvetica Neue', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -44,7 +64,7 @@ export class MainHeader extends LitElement {
             height: 47px;
             padding: 2px 10px 2px 13px;
             background: transparent;
-            overflow: hidden;
+            overflow: visible; /* Changed from hidden to visible to allow dropdown to show */
             border-radius: 9000px;
             /* backdrop-filter: blur(1px); */
             justify-content: space-between;
@@ -52,6 +72,7 @@ export class MainHeader extends LitElement {
             display: inline-flex;
             box-sizing: border-box;
             position: relative;
+            gap: 16px; /* Add gap between header elements */
         }
 
         .header::before {
@@ -83,22 +104,31 @@ export class MainHeader extends LitElement {
         .listen-button {
             -webkit-app-region: no-drag;
             height: 26px;
-            padding: 0 13px;
+            padding: 0 15px;
             background: transparent;
             border-radius: 9000px;
             justify-content: center;
-            width: 78px;
             align-items: center;
             gap: 6px;
             display: flex;
             border: none;
-            cursor: pointer;
+            cursor: pointer; /* Ensure pointer cursor for all listen buttons */
             position: relative;
+            min-width: 130px;
+            white-space: nowrap;
+        }
+
+        .listen-button.start-interview {
+            min-width: 120px;
         }
 
         .listen-button:disabled {
             cursor: default;
             opacity: 0.8;
+        }
+
+        .listen-button:hover {
+            cursor: pointer; /* Ensure pointer cursor on hover */
         }
 
         .listen-button.active::before {
@@ -125,10 +155,6 @@ export class MainHeader extends LitElement {
 
         .listen-button.done:hover {
             background-color: #f0f0f0;
-        }
-
-        .listen-button:hover::before {
-            background: rgba(255, 255, 255, 0.18);
         }
 
         .listen-button::before {
@@ -158,6 +184,140 @@ export class MainHeader extends LitElement {
 
         .listen-button.done::after {
             display: none;
+        }
+
+        /* ==================== RESEARCH INTERFACE STYLES ==================== */
+        
+        .study-selector {
+            position: relative;
+            display: flex;
+            align-items: center;
+            z-index: 1000;
+            cursor: pointer; /* Add pointer cursor for the study selector */
+        }
+
+        .study-button {
+            -webkit-app-region: no-drag;
+            height: 26px;
+            padding: 0 13px;
+            background: transparent;
+            border-radius: 9000px;
+            justify-content: center;
+            align-items: center;
+            gap: 6px;
+            display: flex;
+            border: none;
+            cursor: pointer;
+            position: relative;
+            min-width: 120px;
+        }
+
+        .study-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .study-button:hover {
+            cursor: pointer; /* Ensure pointer cursor on hover */
+        }
+
+        .dropdown-arrow {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 10px;
+            margin-left: 8px;
+            transition: transform 0.2s ease;
+            cursor: pointer; /* Add pointer cursor to dropdown arrow */
+        }
+
+        .dropdown-arrow.open {
+            transform: rotate(180deg); /* Rotate arrow when dropdown is open */
+        }
+
+        .interview-controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 140px;
+        }
+
+        .timer-display {
+            color: white;
+            font-size: 12px;
+            font-weight: 600;
+            font-family: 'SF Mono', Monaco, monospace;
+            padding: 0 8px;
+            min-width: 50px;
+            text-align: center;
+        }
+
+        .timer-display::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255, 255, 255, 0.14);
+            border-radius: 9000px;
+            z-index: -1;
+        }
+
+        .timer-text {
+            color: white;
+            font-size: 12px;
+            font-weight: 600;
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+
+        .control-button {
+            -webkit-app-region: no-drag;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer !important;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.1);
+            transition: background 0.15s ease;
+        }
+
+        .control-button:hover {
+            background: rgba(255, 255, 255, 0.2);
+            cursor: pointer !important;
+        }
+
+        .control-button.pause {
+            background: rgba(255, 193, 7, 0.2);
+        }
+
+        .control-button.pause:hover {
+            background: rgba(255, 193, 7, 0.3);
+            cursor: pointer !important;
+        }
+
+        .control-button.stop {
+            background: rgba(220, 53, 69, 0.2);
+        }
+
+        .control-button.stop:hover {
+            background: rgba(220, 53, 69, 0.3);
+            cursor: pointer !important;
+        }
+
+        .interview-status {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .status-indicator {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #28a745;
+        }
+
+        .status-indicator.paused {
+            background: #ffc107;
         }
 
         .loading-dots {
@@ -199,17 +359,18 @@ export class MainHeader extends LitElement {
             padding: 0 8px;
             border-radius: 6px;
             transition: background 0.15s ease;
+            cursor: pointer; /* Add pointer cursor for Show/Hide button */
         }
 
         .header-actions:hover {
             background: rgba(255, 255, 255, 0.1);
+            cursor: pointer; /* Ensure pointer cursor on hover */
         }
 
         .ask-action {
             margin-left: 4px;
         }
 
-        .action-button,
         .action-text {
             padding-bottom: 1px;
             justify-content: center;
@@ -223,7 +384,10 @@ export class MainHeader extends LitElement {
             font-size: 12px;
             font-family: 'Helvetica Neue', sans-serif;
             font-weight: 500; /* Medium */
-            word-wrap: break-word;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 200px; /* Limit width for study names */
         }
 
         .icon-container {
@@ -338,23 +502,37 @@ export class MainHeader extends LitElement {
             transform: none !important;
             will-change: auto !important;
         }
+
+        .control-button,
+        .control-button:hover,
+        .control-button:active,
+        .control-button:focus {
+            cursor: pointer !important;
+        }
+
+        .control-button * {
+            cursor: pointer !important;
+            pointer-events: none;
+        }
         `;
 
     constructor() {
         super();
-        this.shortcuts = {};
+        this.selectedStudy = null;
+        this.availableStudies = [];
+        this.interviewStatus = 'idle';
+        this.interviewStartTime = 0;
+        this.interviewDuration = 0;
+        this.showStudySelector = false;
+        this.timerInterval = null;
+        
+        // Original UI state
         this.isVisible = true;
         this.isAnimating = false;
         this.hasSlidIn = false;
-        this.settingsHideTimer = null;
-        this.isTogglingSession = false;
-        this.listenSessionStatus = 'beforeSession';
-        this.animationEndTimer = null;
-        this.handleAnimationEnd = this.handleAnimationEnd.bind(this);
-        this.handleMouseMove = this.handleMouseMove.bind(this);
-        this.handleMouseUp = this.handleMouseUp.bind(this);
-        this.dragState = null;
         this.wasJustDragged = false;
+        this.dragState = null;
+        this.animationEndTimer = null;
     }
 
     _getListenButtonText(status) {
@@ -366,233 +544,241 @@ export class MainHeader extends LitElement {
         }
     }
 
-    async handleMouseDown(e) {
-        e.preventDefault();
-
-        const initialPosition = await window.api.mainHeader.getHeaderPosition();
-
-        this.dragState = {
-            initialMouseX: e.screenX,
-            initialMouseY: e.screenY,
-            initialWindowX: initialPosition.x,
-            initialWindowY: initialPosition.y,
-            moved: false,
-        };
-
-        window.addEventListener('mousemove', this.handleMouseMove, { capture: true });
-        window.addEventListener('mouseup', this.handleMouseUp, { once: true, capture: true });
+    // ==================== TIMER MANAGEMENT ====================
+    
+    startTimer() {
+        this.interviewStartTime = Date.now();
+        this.interviewDuration = 0;
+        this.timerInterval = setInterval(() => {
+            if (this.interviewStatus === 'active') {
+                this.interviewDuration = Date.now() - this.interviewStartTime;
+                this.requestUpdate();
+            }
+        }, 1000);
     }
+
+    stopTimer() {
+        if (this.timerInterval) {
+            clearInterval(this.timerInterval);
+            this.timerInterval = null;
+        }
+        this.interviewDuration = 0;
+        this.interviewStartTime = 0;
+        }
+
+    formatTime(milliseconds) {
+        const totalSeconds = Math.floor(milliseconds / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+
+    // ==================== EVENT HANDLERS ====================
+    
+    async _handleStudySelection(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        console.log('[MainHeader] Study selection clicked, current state:', {
+            interviewStatus: this.interviewStatus,
+            showStudySelector: this.showStudySelector,
+            availableStudies: this.availableStudies.length
+        });
+        
+        if (this.interviewStatus === 'active' || this.interviewStatus === 'paused') {
+            console.log('[MainHeader] Interview is active, not showing dropdown');
+            return;
+        }
+        
+        const newShowState = !this.showStudySelector;
+        this.showStudySelector = newShowState;
+        
+        // Show/hide the study dropdown window via IPC
+        if (window.api?.mainHeader) {
+            window.api.mainHeader.showStudyDropdown(newShowState, this.availableStudies);
+        }
+        
+        console.log('[MainHeader] Toggled dropdown to:', this.showStudySelector);
+        this.requestUpdate();
+    }
+
+    async _selectStudy(study) {
+        console.log('[MainHeader] Study selected:', study.title);
+        this.selectedStudy = study;
+        this.showStudySelector = false;
+        
+        // Hide the dropdown window
+        if (window.api?.mainHeader) {
+            window.api.mainHeader.showStudyDropdown(false);
+        }
+        
+        this.requestUpdate();
+    }
+
+    async _handleDocumentClick(e) {
+        // Close dropdown if clicking outside and it's open
+        if (this.showStudySelector && !e.composedPath().includes(this)) {
+            console.log('[MainHeader] Closing dropdown due to outside click');
+            this.showStudySelector = false;
+            
+            // Hide the dropdown window
+            if (window.api?.mainHeader) {
+                window.api.mainHeader.showStudyDropdown(false);
+            }
+            
+            this.requestUpdate();
+        }
+    }
+
+    async _handleStartInterview() {
+        if (!this.selectedStudy || this.isTogglingSession) return;
+        
+        console.log('[MainHeader] Starting interview with study:', {
+            studyId: this.selectedStudy.id,
+            studyTitle: this.selectedStudy.title,
+            hasQuestions: !!this.selectedStudy.questions,
+            questionCount: this.selectedStudy.questions?.length || 0
+        });
+        
+        this.isTogglingSession = true;
+        try {
+            // Close dropdown and resize window if open
+            if (this.showStudySelector) {
+                this.showStudySelector = false;
+                // Hide the dropdown window
+                if (window.api?.mainHeader) {
+                    window.api.mainHeader.showStudyDropdown(false);
+                }
+            }
+            
+            // Navigate to research view first so it's ready to receive events
+            console.log('[MainHeader] Navigating to research view first');
+            await window.api.mainHeader.sendResearchButtonClick();
+            console.log('[MainHeader] Navigation to research view completed');
+            
+            // Give the research view a moment to load and set up event listeners
+            await new Promise(resolve => setTimeout(resolve, 200));
+            
+            // Now start the research session (ResearchView is ready to receive events)
+            console.log('[MainHeader] Calling research.startResearchSession with studyId:', this.selectedStudy.id);
+            await window.api.research.startResearchSession(this.selectedStudy.id);
+            console.log('[MainHeader] Research session started successfully');
+            
+            this.interviewStatus = 'active';
+            this.startTimer();
+            
+        } catch (error) {
+            console.error('[MainHeader] Failed to start interview:', error);
+        } finally {
+            this.isTogglingSession = false;
+            this.requestUpdate();
+        }
+    }
+
+    async _handlePauseInterview() {
+        try {
+            if (this.interviewStatus === 'paused') {
+                await window.api.research.resumeResearchSession();
+                this.interviewStatus = 'active';
+                } else {
+                await window.api.research.pauseResearchSession();
+                this.interviewStatus = 'paused';
+            }
+            this.requestUpdate();
+        } catch (error) {
+            console.error('[MainHeader] Failed to pause/resume interview:', error);
+        }
+    }
+
+    async _handleStopInterview() {
+        if (this.isTogglingSession) return;
+        
+        this.isTogglingSession = true;
+        try {
+            await window.api.research.stopResearchSession();
+            this.interviewStatus = 'idle';
+            this.stopTimer();
+            
+            console.log('[MainHeader] Interview stopped - staying in research view for analysis');
+            // Note: We stay in research view so user can see the analysis results
+            
+        } catch (error) {
+            console.error('[MainHeader] Failed to stop interview:', error);
+        } finally {
+            this.isTogglingSession = false;
+            this.requestUpdate();
+        }
+    }
+
+    _handleToggleAllWindowsVisibility() {
+        if (this.wasJustDragged) return;
+        if (window.api) {
+            window.api.mainHeader.sendToggleAllWindowsVisibility();
+        }
+    }
+
+    // ==================== ORIGINAL DRAG/ANIMATION HANDLERS ====================
+    
+    handleMouseDown(e) {
+        if (e.button !== 0) return;
+        
+        this.dragState = {
+            startX: e.clientX,
+            startY: e.clientY,
+            moved: false
+        };
+        
+        window.addEventListener('mousemove', this.handleMouseMove, { capture: true });
+        window.addEventListener('mouseup', this.handleMouseUp, { capture: true });
+        }
 
     handleMouseMove(e) {
         if (!this.dragState) return;
 
-        const deltaX = Math.abs(e.screenX - this.dragState.initialMouseX);
-        const deltaY = Math.abs(e.screenY - this.dragState.initialMouseY);
+        const deltaX = Math.abs(e.clientX - this.dragState.startX);
+        const deltaY = Math.abs(e.clientY - this.dragState.startY);
         
         if (deltaX > 3 || deltaY > 3) {
             this.dragState.moved = true;
         }
-
-        const newWindowX = this.dragState.initialWindowX + (e.screenX - this.dragState.initialMouseX);
-        const newWindowY = this.dragState.initialWindowY + (e.screenY - this.dragState.initialMouseY);
-
-        window.api.mainHeader.moveHeaderTo(newWindowX, newWindowY);
     }
 
     handleMouseUp(e) {
         if (!this.dragState) return;
 
-        const wasDragged = this.dragState.moved;
-
+        this.wasJustDragged = this.dragState.moved;
+        
         window.removeEventListener('mousemove', this.handleMouseMove, { capture: true });
+        window.removeEventListener('mouseup', this.handleMouseUp, { capture: true });
+        
         this.dragState = null;
-
-        if (wasDragged) {
-            this.wasJustDragged = true;
+        
+        if (this.wasJustDragged) {
             setTimeout(() => {
                 this.wasJustDragged = false;
-            }, 0);
+            }, 100);
         }
     }
 
-    toggleVisibility() {
-        if (this.isAnimating) {
-            console.log('[MainHeader] Animation already in progress, ignoring toggle');
-            return;
-        }
-        
-        if (this.animationEndTimer) {
-            clearTimeout(this.animationEndTimer);
-            this.animationEndTimer = null;
-        }
-        
-        this.isAnimating = true;
-        
-        if (this.isVisible) {
-            this.hide();
-        } else {
-            this.show();
-        }
-    }
-
-    hide() {
-        this.classList.remove('showing');
-        this.classList.add('hiding');
-    }
-    
-    show() {
-        this.classList.remove('hiding', 'hidden');
-        this.classList.add('showing');
-    }
-    
     handleAnimationEnd(e) {
         if (e.target !== this) return;
-    
+
         this.isAnimating = false;
-    
+        
         if (this.classList.contains('hiding')) {
+            this.classList.remove('hiding');
             this.classList.add('hidden');
-            if (window.api) {
-                window.api.mainHeader.sendHeaderAnimationFinished('hidden');
-            }
+            this.isVisible = false;
         } else if (this.classList.contains('showing')) {
-            if (window.api) {
-                window.api.mainHeader.sendHeaderAnimationFinished('visible');
-            }
+            this.classList.remove('showing');
+            this.isVisible = true;
         }
-    }
-
-    startSlideInAnimation() {
-        if (this.hasSlidIn) return;
-        this.classList.add('sliding-in');
-    }
-
-    connectedCallback() {
-        super.connectedCallback();
-        this.addEventListener('animationend', this.handleAnimationEnd);
-
-        if (window.api) {
-
-            this._sessionStateTextListener = (event, { success }) => {
-                if (success) {
-                    this.listenSessionStatus = ({
-                        beforeSession: 'inSession',
-                        inSession: 'afterSession',
-                        afterSession: 'beforeSession',
-                    })[this.listenSessionStatus] || 'beforeSession';
-                } else {
-                    this.listenSessionStatus = 'beforeSession';
-                }
-                this.isTogglingSession = false; // ✨ 로딩 상태만 해제
-            };
-            window.api.mainHeader.onListenChangeSessionResult(this._sessionStateTextListener);
-
-            this._shortcutListener = (event, keybinds) => {
-                console.log('[MainHeader] Received updated shortcuts:', keybinds);
-                this.shortcuts = keybinds;
-            };
-            window.api.mainHeader.onShortcutsUpdated(this._shortcutListener);
-        }
-    }
-
-    disconnectedCallback() {
-        super.disconnectedCallback();
-        this.removeEventListener('animationend', this.handleAnimationEnd);
         
         if (this.animationEndTimer) {
             clearTimeout(this.animationEndTimer);
             this.animationEndTimer = null;
         }
-        
-        if (window.api) {
-            if (this._sessionStateTextListener) {
-                window.api.mainHeader.removeOnListenChangeSessionResult(this._sessionStateTextListener);
-            }
-            if (this._shortcutListener) {
-                window.api.mainHeader.removeOnShortcutsUpdated(this._shortcutListener);
-            }
-        }
     }
-
-    showSettingsWindow(element) {
-        if (this.wasJustDragged) return;
-        if (window.api) {
-            console.log(`[MainHeader] showSettingsWindow called at ${Date.now()}`);
-            window.api.mainHeader.showSettingsWindow();
-
-        }
-    }
-
-    hideSettingsWindow() {
-        if (this.wasJustDragged) return;
-        if (window.api) {
-            console.log(`[MainHeader] hideSettingsWindow called at ${Date.now()}`);
-            window.api.mainHeader.hideSettingsWindow();
-        }
-    }
-
-    async _handleListenClick() {
-        if (this.wasJustDragged) return;
-        if (this.isTogglingSession) {
-            return;
-        }
-
-        this.isTogglingSession = true;
-
-        try {
-            const listenButtonText = this._getListenButtonText(this.listenSessionStatus);
-            if (window.api) {
-                await window.api.mainHeader.sendListenButtonClick(listenButtonText);
-            }
-        } catch (error) {
-            console.error('IPC invoke for session change failed:', error);
-            this.isTogglingSession = false;
-        }
-    }
-
-    async _handleAskClick() {
-        if (this.wasJustDragged) return;
-
-        try {
-            if (window.api) {
-                await window.api.mainHeader.sendAskButtonClick();
-            }
-        } catch (error) {
-            console.error('IPC invoke for ask button failed:', error);
-        }
-    }
-
-    async _handleResearchClick() {
-        if (this.wasJustDragged) return;
-
-        try {
-            console.log('[MainHeader] Research button clicked, attempting navigation');
-            
-            if (!window.api) {
-                console.error('[MainHeader] window.api not available');
-                return;
-            }
-
-            // Use the new IPC method to navigate to research view
-            await window.api.mainHeader.sendResearchButtonClick();
-            console.log('[MainHeader] Research navigation request sent successfully');
-        } catch (error) {
-            console.error('[MainHeader] Failed to navigate to research view:', error);
-        }
-    }
-
-    async _handleToggleAllWindowsVisibility() {
-        if (this.wasJustDragged) return;
-
-        try {
-            if (window.api) {
-                await window.api.mainHeader.sendToggleAllWindowsVisibility();
-            }
-        } catch (error) {
-            console.error('IPC invoke for all windows visibility button failed:', error);
-        }
-    }
-
 
     renderShortcut(accelerator) {
         if (!accelerator) return html``;
@@ -617,69 +803,188 @@ export class MainHeader extends LitElement {
         `)}`;
     }
 
-    render() {
-        const listenButtonText = this._getListenButtonText(this.listenSessionStatus);
+    showSettingsWindow(element) {
+        if (this.wasJustDragged) return;
+        if (window.api) {
+            window.api.mainHeader.showSettingsWindow();
+        }
+    }
+
+    hideSettingsWindow() {
+        if (window.api) {
+            window.api.mainHeader.hideSettingsWindow();
+        }
+    }
+
+    // ==================== LIFECYCLE METHODS ====================
     
-        const buttonClasses = {
-            active: listenButtonText === 'Stop',
-            done: listenButtonText === 'Done',
-        };
-        const showStopIcon = listenButtonText === 'Stop' || listenButtonText === 'Done';
+    connectedCallback() {
+        super.connectedCallback();
+        this.addEventListener('animationend', this.handleAnimationEnd);
+        document.addEventListener('click', this._handleDocumentClick.bind(this));
+
+        if (window.api) {
+            this._shortcutListener = (event, keybinds) => {
+                console.log('[MainHeader] Received updated shortcuts:', keybinds);
+                this.shortcuts = keybinds;
+            };
+            
+            // Set up event listeners
+            window.api.mainHeader?.onShortcutsUpdated?.(this._shortcutListener);
+            
+            // Listen for study selection from dropdown window
+            if (window.electronAPI) {
+                window.electronAPI.ipcRenderer.on('study-selected', (event, study) => {
+                    console.log('[MainHeader] Received study selection from dropdown:', study.title);
+                    this._selectStudy(study);
+                });
+            }
+            
+            // Load available studies
+            this.loadAvailableStudies();
+        }
+
+        // Set up mouse listeners for drag functionality
+        this.handleAnimationEnd = this.handleAnimationEnd.bind(this);
+        this.handleMouseMove = this.handleMouseMove.bind(this);
+        this.handleMouseUp = this.handleMouseUp.bind(this);
+    }
+
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        this.removeEventListener('animationend', this.handleAnimationEnd);
+        document.removeEventListener('click', this._handleDocumentClick.bind(this));
+        
+        // Clean up shortcuts listener
+        if (window.api?.mainHeader?.removeOnShortcutsUpdated && this._shortcutListener) {
+            window.api.mainHeader.removeOnShortcutsUpdated(this._shortcutListener);
+        }
+        
+        // Clean up study selection listener
+        if (window.electronAPI) {
+            window.electronAPI.ipcRenderer.removeAllListeners('study-selected');
+        }
+        
+        // Clean up timers
+        if (this.timerInterval) {
+            clearInterval(this.timerInterval);
+            this.timerInterval = null;
+        }
+        
+        if (this.animationEndTimer) {
+            clearTimeout(this.animationEndTimer);
+            this.animationEndTimer = null;
+        }
+    }
+
+    async loadAvailableStudies() {
+        try {
+            if (window.api && window.api.research) {
+                console.log('[MainHeader] Loading available studies...');
+                this.availableStudies = await window.api.research.getAvailableStudies();
+                console.log('[MainHeader] Loaded studies:', this.availableStudies.length);
+                
+                // Auto-select first study if none selected
+                if (!this.selectedStudy && this.availableStudies.length > 0) {
+                    this.selectedStudy = this.availableStudies[0];
+                    console.log('[MainHeader] Auto-selected study:', this.selectedStudy.title);
+                }
+                
+                this.requestUpdate();
+            }
+        } catch (error) {
+            console.error('[MainHeader] Failed to load studies:', error);
+            this.availableStudies = [];
+        }
+    }
+
+    // ==================== RENDER METHOD ====================
+
+    render() {
+        const isInterviewActive = this.interviewStatus === 'active' || this.interviewStatus === 'paused';
+        const canStartInterview = this.selectedStudy && !isInterviewActive;
+
+        console.log('[MainHeader] Rendering with state:', {
+            showStudySelector: this.showStudySelector,
+        isInterviewActive,
+            availableStudiesCount: this.availableStudies.length
+        });
 
         return html`
             <div class="header" @mousedown=${this.handleMouseDown}>
+                <!-- Study Selection / Display -->
+                <div class="study-selector">
                 <button 
-                    class="listen-button ${Object.keys(buttonClasses).filter(k => buttonClasses[k]).join(' ')}"
-                    @click=${this._handleListenClick}
-                    ?disabled=${this.isTogglingSession}
-                >
-                    ${this.isTogglingSession
-                        ? html`
+                        class="listen-button"
+                        @click=${this._handleStudySelection}
+                        ?disabled=${isInterviewActive}
+                    >
+                        <div class="action-text">
+                            <div class="action-text-content">
+                                ${this.selectedStudy 
+                                    ? this.selectedStudy.title
+                                    : 'Select Study'}
+                            </div>
+                        </div>
+                        ${!isInterviewActive ? html`<div class="dropdown-arrow ${this.showStudySelector ? 'open' : ''}">▼</div>` : ''}
+                    </button>
+                </div>
+
+                <!-- Interview Controls -->
+                ${!isInterviewActive ? html`
+                    <!-- Start Interview Button -->
+                    <button 
+                        class="listen-button start-interview ${canStartInterview ? '' : 'disabled'}"
+                        @click=${this._handleStartInterview}
+                        ?disabled=${!canStartInterview || this.isTogglingSession}
+                    >
+                        ${this.isTogglingSession ? html`
                             <div class="loading-dots">
                                 <span></span><span></span><span></span>
                             </div>
-                        `
-                        : html`
+                        ` : html`
                             <div class="action-text">
-                                <div class="action-text-content">${listenButtonText}</div>
+                                <div class="action-text-content">Start Interview</div>
                             </div>
-                            <div class="listen-icon">
-                                ${showStopIcon
-                                    ? html`
-                                        <svg width="9" height="9" viewBox="0 0 9 9" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                            <rect width="9" height="9" rx="1" fill="white"/>
+                        `}
+                    </button>
+                ` : html`
+                    <!-- Timer and Control Buttons -->
+                    <div class="interview-controls">
+                        <div class="timer-display">${this.formatTime(this.interviewDuration)}</div>
+                        
+                        <button 
+                            class="control-button pause"
+                            @click=${this._handlePauseInterview}
+                            title="${this.interviewStatus === 'paused' ? 'Resume' : 'Pause'}"
+                        >
+                            ${this.interviewStatus === 'paused' ? html`
+                                <svg width="8" height="10" viewBox="0 0 8 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M0 0L8 5L0 10V0Z" fill="#ffc107"/>
                                         </svg>
-                                    `
-                                    : html`
-                                        <svg width="12" height="11" viewBox="0 0 12 11" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                            <path d="M1.69922 2.7515C1.69922 2.37153 2.00725 2.0635 2.38722 2.0635H2.73122C3.11119 2.0635 3.41922 2.37153 3.41922 2.7515V8.2555C3.41922 8.63547 3.11119 8.9435 2.73122 8.9435H2.38722C2.00725 8.9435 1.69922 8.63547 1.69922 8.2555V2.7515Z" fill="white"/>
-                                            <path d="M5.13922 1.3755C5.13922 0.995528 5.44725 0.6875 5.82722 0.6875H6.17122C6.55119 0.6875 6.85922 0.995528 6.85922 1.3755V9.6315C6.85922 10.0115 6.55119 10.3195 6.17122 10.3195H5.82722C5.44725 10.3195 5.13922 10.0115 5.13922 9.6315V1.3755Z" fill="white"/>
-                                            <path d="M8.57922 3.0955C8.57922 2.71553 8.88725 2.4075 9.26722 2.4075H9.61122C9.99119 2.4075 10.2992 2.71553 10.2992 3.0955V7.9115C10.2992 8.29147 9.99119 8.5995 9.61122 8.5995H9.26722C8.88725 8.5995 8.57922 8.29147 8.57922 7.9115V3.0955Z" fill="white"/>
+                            ` : html`
+                                <svg width="8" height="10" viewBox="0 0 8 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <rect x="1" y="0" width="2" height="10" fill="#ffc107"/>
+                                    <rect x="5" y="0" width="2" height="10" fill="#ffc107"/>
                                         </svg>
-                                    `}
-                            </div>
                         `}
                 </button>
 
-                <div class="header-actions ask-action" @click=${() => this._handleAskClick()}>
-                    <div class="action-text">
-                        <div class="action-text-content">Ask</div>
+                        <button 
+                            class="control-button stop"
+                            @click=${this._handleStopInterview}
+                            ?disabled=${this.isTogglingSession}
+                            title="Stop Interview"
+                        >
+                            <svg width="8" height="8" viewBox="0 0 8 8" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <rect x="0" y="0" width="8" height="8" fill="#dc3545"/>
+                            </svg>
+                        </button>
                     </div>
-                    <div class="icon-container">
-                        ${this.renderShortcut(this.shortcuts.nextStep)}
-                    </div>
-                </div>
+                `}
 
-                <div class="header-actions" @click=${() => this._handleResearchClick()}>
-                    <div class="action-text">
-                        <div class="action-text-content">Research</div>
-                    </div>
-                    <div class="icon-container">
-                        <div class="icon-box">📊</div>
-                    </div>
-                </div>
-
-                <div class="header-actions" @click=${() => this._handleToggleAllWindowsVisibility()}>
+                <!-- Show/Hide Button -->
+                <div class="header-actions" @click=${this._handleToggleAllWindowsVisibility}>
                     <div class="action-text">
                         <div class="action-text-content">Show/Hide</div>
                     </div>
@@ -688,6 +993,7 @@ export class MainHeader extends LitElement {
                     </div>
                 </div>
 
+                <!-- Settings Button -->
                 <button 
                     class="settings-button"
                     @mouseenter=${(e) => this.showSettingsWindow(e.currentTarget)}

@@ -93,6 +93,32 @@ class WindowLayoutManager {
         return { x: Math.round(clampedX), y: Math.round(clampedY) };
     }
 
+    calculateStudyDropdownPosition() {
+        const header = this.windowPool.get('header');
+        const dropdown = this.windowPool.get('study-dropdown');
+
+        if (!header || header.isDestroyed() || !dropdown || dropdown.isDestroyed()) {
+            return null;
+        }
+
+        const headerBounds = header.getBounds();
+        const dropdownBounds = dropdown.getBounds();
+        const display = getCurrentDisplay(header);
+        const { x: workAreaX, y: workAreaY, width: screenWidth, height: screenHeight } = display.workArea;
+
+        const PAD = 8;
+        // Position dropdown below the "Select Study" button (approximately 20px from left edge of header)
+        const studyButtonOffset = 20;
+
+        const x = headerBounds.x + studyButtonOffset;
+        const y = headerBounds.y + headerBounds.height + PAD;
+
+        const clampedX = Math.max(workAreaX + 10, Math.min(workAreaX + screenWidth - dropdownBounds.width - 10, x));
+        const clampedY = Math.max(workAreaY + 10, Math.min(workAreaY + screenHeight - dropdownBounds.height - 10, y));
+
+        return { x: Math.round(clampedX), y: Math.round(clampedY) };
+    }
+
 
     calculateHeaderResize(header, { width, height }) {
         if (!header) return null;
@@ -203,10 +229,25 @@ class WindowLayoutManager {
             const winName = askVis ? 'ask' : 'listen';
             const winB = askVis ? askB : listenB;
             if (!winB) return {};
-    
-            let xRel = headerCenterXRel - winB.width / 2;
+
+            // Left-align the window with the header's left edge
+            let xRel = headerBounds.x - workAreaX;
+            
+            console.log(`[Layout Debug] Single window positioning for ${winName}:`, {
+                headerX: headerBounds.x,
+                headerWidth: headerBounds.width,
+                headerStart: headerBounds.x,
+                headerEnd: headerBounds.x + headerBounds.width,
+                windowWidth: winB.width,
+                windowStart: headerBounds.x,
+                windowEnd: headerBounds.x + winB.width,
+                workAreaX: workAreaX,
+                calculatedXRel: xRel
+            });
+            
             xRel = Math.max(PAD, Math.min(screenWidth - winB.width - PAD, xRel));
-    
+            console.log(`[Layout Debug] After bounds check: xRel = ${xRel}, finalX = ${Math.round(xRel + workAreaX)}`);
+
             let yPos;
             if (strategy.primary === 'above') {
                 yPos = (headerBounds.y - workAreaY) - PAD - winB.height;
@@ -214,7 +255,12 @@ class WindowLayoutManager {
                 yPos = (headerBounds.y - workAreaY) + headerBounds.height + PAD;
             }
             
-            layout[winName] = { x: Math.round(xRel + workAreaX), y: Math.round(yPos + workAreaY), width: winB.width, height: winB.height };
+            layout[winName] = { 
+                x: Math.round(xRel + workAreaX), 
+                y: Math.round(yPos + workAreaY), 
+                width: winB.width, 
+                height: Math.max(winB.height, 800) // Ensure minimum height of 800px
+            };
         }
         return layout;
     }
