@@ -12,6 +12,7 @@ const sessionRepository = require('../common/repositories/session');
 const internalBridge = require('../../bridge/internalBridge');
 const { localStudiesRepository } = require('../common/repositories/localStudies');
 const QuestionDetectionService = require('./questionDetectionService');
+const screenRecordingService = require('./screenRecordingService');
 
 // Utility functions
 function tsSec() { 
@@ -68,6 +69,16 @@ class ResearchService extends EventEmitter {
         this.participantTurnBuffer = ''; // Buffer for debounced participant scoring
         this.lastParticipantScoringAt = 0; // Timestamp of last scoring operation
         
+        // NEW: Speech completion detection
+        this.speakerTurnManager = {
+            currentSpeaker: null,
+            currentTurnBuffer: '',
+            currentTurnStartTime: null,
+            turnCompletionTimeout: null,
+            turnCompletionDelay: 2000, // 2 seconds of silence to consider turn complete
+            interviewerTurnHistory: [] // Keep last few complete interviewer turns
+        };
+        
         // Metrics and telemetry
         this.metrics = {
             interviewerTurns: 0,
@@ -77,7 +88,7 @@ class ResearchService extends EventEmitter {
             followUpsShown: 0
         };
         
-        console.log('[ResearchService] Service initialized with interviewer-driven detection');
+        console.log('[ResearchService] Service initialized with speech completion detection');
     }
 
     // Lazy load listen service to avoid circular dependency
@@ -477,6 +488,40 @@ class ResearchService extends EventEmitter {
             }
         }
 
+        // NEW: Start screen recording for research session
+        try {
+            console.log('[ResearchService] Starting screen recording for research session...');
+            const recordingResult = await screenRecordingService.startRecording(sessionId, {
+                videoBitsPerSecond: 2500000, // 2.5 Mbps for good quality
+                audioBitsPerSecond: 128000   // 128 kbps for system audio
+            });
+            
+            if (recordingResult.success) {
+                console.log('[ResearchService] Screen recording started successfully:', recordingResult.recordingPath);
+                
+                // Emit recording started event to UI
+                this.emit('screen-recording-started', {
+                    sessionId,
+                    recordingPath: recordingResult.recordingPath
+                });
+                
+                // Tell the renderer to start screen capture
+                internalBridge.emit('research:startScreenRecording', {
+                    sessionId,
+                    options: {
+                        videoBitsPerSecond: 2500000, // 2.5 Mbps for good quality
+                        audioBitsPerSecond: 128000   // 128 kbps for system audio
+                    }
+                });
+            } else {
+                console.warn('[ResearchService] Failed to start screen recording:', recordingResult.error);
+                // Continue without screen recording if it fails
+            }
+        } catch (error) {
+            console.error('[ResearchService] Error starting screen recording:', error);
+            // Continue without screen recording if it fails
+        }
+        
         // Prepare session data to emit
         const sessionData = { 
             studyId, 
@@ -530,6 +575,10 @@ class ResearchService extends EventEmitter {
         try {
             // Stop question detection
             this.questionDetectionService.stopDetection();
+
+            // NEW: Clean up speech completion detection state
+            this._resetTurnState();
+            this.speakerTurnManager.interviewerTurnHistory = [];
 
             // End session in database
             const sessionRepo = require('../common/repositories/session'); // Assuming getSessionRepository is in session.js
@@ -588,6 +637,10 @@ class ResearchService extends EventEmitter {
         this.isLiveAnalysisActive = false;
         this.pendingAnalysis = false;
         
+        // NEW: Clean up speech completion detection state
+        this._resetTurnState();
+        this.speakerTurnManager.interviewerTurnHistory = [];
+        
         // Stop listen service and audio capture
         try {
             console.log('[ResearchService] Stopping audio capture and listen service...');
@@ -602,6 +655,32 @@ class ResearchService extends EventEmitter {
             console.log('[ResearchService] Audio capture and listen service stopped successfully');
         } catch (error) {
             console.error('[ResearchService] Failed to stop listen service or audio capture:', error);
+        }
+        
+        // NEW: Stop screen recording
+        try {
+            console.log('[ResearchService] Stopping screen recording...');
+            
+            // Tell renderer to stop recording first
+            internalBridge.emit('research:stopScreenRecording');
+            
+            // Stop recording in service (will be finalized when renderer sends data)
+            const recordingResult = await screenRecordingService.stopRecording();
+            
+            if (recordingResult.success) {
+                console.log('[ResearchService] Screen recording stopped successfully');
+                console.log('[ResearchService] Recording saved to:', recordingResult.recordingPath);
+                
+                this.emit('screen-recording-stopped', {
+                    sessionId: this.currentSession.session_id,
+                    recordingPath: recordingResult.recordingPath,
+                    duration: recordingResult.duration
+                });
+            } else {
+                console.warn('[ResearchService] Failed to stop screen recording:', recordingResult.error);
+            }
+        } catch (error) {
+            console.error('[ResearchService] Error stopping screen recording:', error);
         }
         
         // Save all responses
@@ -711,15 +790,16 @@ class ResearchService extends EventEmitter {
         
         console.log(`[ResearchService] Processing transcript: ${speaker} - ${text.substring(0, 50)}...`);
         
-        // Forward to question detection service as well
+        // NEW: Implement speech completion detection
+        await this._handleSpeechTurn(speaker, text, timestamp);
+        
+        // Still forward to question detection service for compatibility
         if (this.questionDetectionService.isActive) {
             console.log('[ResearchService] Forwarding to question detection service:', { text: text.substring(0, 50), speaker });
             await this.questionDetectionService.processTranscript(text, speaker === 'Me' ? 'moderator' : 'participant');
-        } else {
-            console.log('[ResearchService] Question detection service not active, skipping forwarding');
         }
         
-        // Add to transcript buffer
+        // Add to transcript buffer (for AI analysis)
         this.transcriptBuffer.push({
             speaker,
             text,
@@ -731,39 +811,195 @@ class ResearchService extends EventEmitter {
         if (this.transcriptBuffer.length > 50) {
             this.transcriptBuffer.shift();
         }
+    }
+
+    /**
+     * Handle speech turns with completion detection
+     * Only process complete speaker turns, not partial segments
+     */
+    async _handleSpeechTurn(speaker, text, timestamp) {
+        const turnManager = this.speakerTurnManager;
         
-        console.log(`[ResearchService] Transcript buffer size: ${this.transcriptBuffer.length}`);
+        // CRITICAL: Only process microphone audio ("Me") for QUESTION DETECTION
+        // System audio ("Them") contains participant responses + background noise
+        const isMicrophoneAudio = speaker === 'Me';
+        const isSystemAudio = speaker === 'Them';
         
-        // Trigger analysis immediately for real-time response, with throttling to prevent spam
+        if (isMicrophoneAudio) {
+            console.log(`[ResearchService] 🎤 Processing microphone audio for question detection: "${text.substring(0, 50)}..."`);
+            await this._handleInterviewerSpeechTurn(speaker, text, timestamp);
+        } else if (isSystemAudio) {
+            console.log(`[ResearchService] 🔊 Processing system audio for participant responses: "${text.substring(0, 50)}..."`);
+            await this._handleParticipantSpeechTurn(speaker, text, timestamp);
+        } else {
+            console.log(`[ResearchService] ⚠️ Unknown speaker: ${speaker} - "${text.substring(0, 50)}..."`);
+        }
+    }
+
+    /**
+     * Handle microphone audio (interviewer) - used for question detection
+     */
+    async _handleInterviewerSpeechTurn(speaker, text, timestamp) {
+        const turnManager = this.speakerTurnManager;
+        
+        // Detect if this is a new interviewer turn (system audio interrupted)
+        const wasSystemAudio = turnManager.currentSpeaker === 'Them';
+        
+        if (wasSystemAudio || !turnManager.currentSpeaker) {
+            if (wasSystemAudio) {
+                console.log(`[ResearchService] 🎤 Interviewer resuming after system audio`);
+            }
+            
+            // Reset for new interviewer turn
+            this._resetTurnState();
+            turnManager.currentSpeaker = speaker;
+            turnManager.currentTurnStartTime = timestamp;
+            console.log(`[ResearchService] 🎤 Starting new interviewer turn`);
+        }
+        
+        // Accumulate text for current interviewer turn
+        turnManager.currentTurnBuffer = turnManager.currentTurnBuffer 
+            ? `${turnManager.currentTurnBuffer} ${text}`.trim()
+            : text.trim();
+        
+        // Reset turn completion timeout (interviewer is still talking)
+        if (turnManager.turnCompletionTimeout) {
+            clearTimeout(turnManager.turnCompletionTimeout);
+        }
+        
+        // Set timeout to detect interviewer turn completion (silence)
+        turnManager.turnCompletionTimeout = setTimeout(async () => {
+            console.log(`[ResearchService] 🎤 Interviewer turn completed after ${turnManager.turnCompletionDelay}ms silence`);
+            
+            await this._processCompleteInterviewerTurn(
+                turnManager.currentTurnBuffer,
+                turnManager.currentTurnStartTime,
+                Date.now()
+            );
+            
+            this._resetTurnState();
+        }, turnManager.turnCompletionDelay);
+        
+        console.log(`[ResearchService] 🎤 Interviewer turn accumulated: "${turnManager.currentTurnBuffer.substring(0, 80)}..."`);
+    }
+
+    /**
+     * Handle system audio (participant + background) - used for response tracking only
+     */
+    async _handleParticipantSpeechTurn(speaker, text, timestamp) {
+        // System audio is processed immediately as complete participant responses
+        // (no turn accumulation needed since it's already post-processed)
+        console.log(`[ResearchService] 🔊 Processing immediate participant response: "${text.substring(0, 80)}..."`);
+        
+        this.metrics.participantTurns++;
+        
+        if (this.currentQuestionBeingAsked) {
+            // Accumulate answer for active question
+            this.currentAnswerBeingGiven = this.currentAnswerBeingGiven 
+                ? `${this.currentAnswerBeingGiven} ${text}`.trim()
+                : text.trim();
+            
+            // Keep answer reasonably sized (last 1000 characters)
+            if (this.currentAnswerBeingGiven.length > 1000) {
+                this.currentAnswerBeingGiven = '...' + this.currentAnswerBeingGiven.slice(-1000);
+            }
+            
+            console.log(`[ResearchService] 📝 Participant response added to active question ${this.currentQuestionBeingAsked.substring(0, 8)}: "${text.substring(0, 100)}..."`);
+        } else {
+            console.log(`[ResearchService] 🔊 Participant speaking but no active question: "${text.substring(0, 50)}..."`);
+        }
+        
+        // Trigger AI analysis for participant responses
         const now = Date.now();
         const timeSinceLastAnalysis = now - this.lastAnalysisTime;
-        console.log(`[ResearchService] Time since last analysis: ${timeSinceLastAnalysis}ms (minimum interval: ${this.analysisInterval}ms)`);
         
-        // Check if this is meaningful text worth analyzing immediately
-        const isMeaningfulText = text.trim().length > 2 && !text.match(/^(um|uh|hmm|ah|er)$/i);
+        if (timeSinceLastAnalysis >= this.analysisInterval && !this.pendingAnalysis) {
+            console.log('[ResearchService] Triggering AI analysis for participant response...');
+            await this.analyzeRecentTranscript();
+            this.lastAnalysisTime = now;
+        }
+    }
+
+    /**
+     * Process a complete speaker turn (only called when turn is finished)
+     */
+    async _processCompleteTurn(speaker, completeTurnText, startTime, endTime) {
+        // This method is now primarily used by the interviewer turn completion
+        // Participant responses are handled immediately in _handleParticipantSpeechTurn
         
-        if (timeSinceLastAnalysis >= this.analysisInterval || (isMeaningfulText && !this.pendingAnalysis)) {
-            if (timeSinceLastAnalysis >= this.analysisInterval) {
-                console.log('[ResearchService] Triggering immediate AI analysis...');
-                await this.analyzeRecentTranscript();
-                this.lastAnalysisTime = now;
-            } else if (!this.pendingAnalysis) {
-                // Schedule delayed analysis to respect minimum interval
-                console.log('[ResearchService] Scheduling delayed AI analysis...');
-                this.pendingAnalysis = true;
-                const delay = this.analysisInterval - timeSinceLastAnalysis;
-                setTimeout(async () => {
-                    if (this.isLiveAnalysisActive && this.pendingAnalysis) {
-                        console.log('[ResearchService] Triggering delayed AI analysis...');
-                        await this.analyzeRecentTranscript();
-                        this.lastAnalysisTime = Date.now();
-                        this.pendingAnalysis = false;
-                    }
-                }, delay);
+        if (!completeTurnText || completeTurnText.trim().length === 0) {
+            console.log('[ResearchService] Skipping empty turn');
+            return;
+        }
+        
+        const trimmedText = completeTurnText.trim();
+        console.log(`[ResearchService] 🎯 Processing COMPLETE turn: ${speaker} - "${trimmedText.substring(0, 100)}..."`);
+        console.log(`[ResearchService] Turn duration: ${endTime - startTime}ms`);
+    }
+
+    /**
+     * Process complete interviewer turn - only activate questions when interviewer finishes speaking
+     * This is now only called for microphone audio ("Me")
+     */
+    async _processCompleteInterviewerTurn(completeTurnText, startTime, endTime) {
+        this.metrics.interviewerTurns++;
+        
+        // Store in interviewer turn history
+        this.speakerTurnManager.interviewerTurnHistory.push({
+            text: completeTurnText,
+            startTime,
+            endTime,
+            processed: true,
+            source: 'microphone' // Mark as microphone-only
+        });
+        
+        // Keep only last 5 interviewer turns
+        if (this.speakerTurnManager.interviewerTurnHistory.length > 5) {
+            this.speakerTurnManager.interviewerTurnHistory.shift();
+        }
+        
+        // Only process if this looks like a question
+        if (this.hasQuestionPattern(completeTurnText)) {
+            console.log(`[ResearchService] ✅ Complete interviewer question detected from microphone: "${completeTurnText.substring(0, 100)}..."`);
+            
+            // Classify complete turn to study question
+            const classification = await this.classifyInterviewerTurnToQuestion(completeTurnText);
+            
+            if (classification.questionId) {
+                // Activate the matched question (only from microphone audio)
+                this._activateQuestion(
+                    classification.questionId, 
+                    endTime, 
+                    completeTurnText
+                );
+                
+                console.log(`[ResearchService] 🎯 Question activated from microphone audio: ${classification.questionId.substring(0, 8)}`);
+            } else {
+                console.log(`[ResearchService] Complete microphone question but no study question match (off-script)`);
             }
         } else {
-            console.log('[ResearchService] Skipping analysis - too soon, not meaningful text, or analysis already pending');
+            console.log(`[ResearchService] Complete microphone turn but no question pattern detected: "${completeTurnText.substring(0, 50)}..."`);
         }
+    }
+
+
+
+    /**
+     * Reset turn state when speaker changes or turn completes
+     */
+    _resetTurnState() {
+        const turnManager = this.speakerTurnManager;
+        
+        if (turnManager.turnCompletionTimeout) {
+            clearTimeout(turnManager.turnCompletionTimeout);
+            turnManager.turnCompletionTimeout = null;
+        }
+        
+        turnManager.currentSpeaker = null;
+        turnManager.currentTurnBuffer = '';
+        turnManager.currentTurnStartTime = null;
+        
+        console.log('[ResearchService] 🔄 Turn state reset');
     }
 
     async analyzeRecentTranscript() {
@@ -799,7 +1035,13 @@ class ResearchService extends EventEmitter {
             
             // AI analysis
             const analysis = await this.performQuestionAnalysis(recentText, questionContext);
-            console.log('[ResearchService] AI analysis completed:', analysis);
+            console.log('[ResearchService] 🔍 DEBUG: AI analysis completed:', analysis);
+            console.log('[ResearchService] 🔍 DEBUG: AI suggestions received:', analysis.suggestions?.length || 0, 'suggestions');
+            if (analysis.suggestions && analysis.suggestions.length > 0) {
+                analysis.suggestions.forEach((suggestion, index) => {
+                    console.log(`[ResearchService] 🔍 DEBUG: AI suggestion ${index + 1}: "${suggestion}"`);
+                });
+            }
             
             // Log which questions the AI thinks are being addressed
             if (analysis.question_updates) {
@@ -982,51 +1224,15 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
     }
 
     async updateCurrentQuestionTracking(analysis, transcriptSegments) {
-        console.log(`[ResearchService] === TRACKING DEBUG ===`);
-        console.log(`[ResearchService] Current question before update: ${this.currentQuestionBeingAsked?.substring(0, 8)}...`);
+        console.log(`[ResearchService] === AI ANALYSIS TRACKING ===`);
+        console.log(`[ResearchService] Current question: ${this.currentQuestionBeingAsked?.substring(0, 8)}...`);
         console.log(`[ResearchService] Analysis question_updates:`, analysis.question_updates);
         
-        // P0 Fix: Normalize speaker labels
-        const INTERVIEWER_SPEAKERS = new Set(['Me', 'Researcher', 'Interviewer', 'Host', 'Agent']);
-        const interviewerSegments = transcriptSegments.filter(seg => 
-            INTERVIEWER_SPEAKERS.has(seg.speaker)
-        );
+        // NEW: Since we now handle turn completion detection above, this method focuses on AI analysis only
         
-        console.log(`[ResearchService] Found ${interviewerSegments.length} interviewer segments`);
-        
-        // Method 1: Interviewer-driven question activation
-        if (interviewerSegments.length > 0) {
-            this.metrics.interviewerTurns++;
-            
-            // Collapse interviewer segments into single turn
-            const interviewerTurnText = interviewerSegments.map(seg => seg.text).join(' ');
-            
-            // Only process if this looks like a question
-            if (this.hasQuestionPattern(interviewerTurnText)) {
-                console.log(`[ResearchService] Processing interviewer question turn: "${interviewerTurnText.substring(0, 100)}..."`);
-                
-                // Classify turn to study question
-                const classification = await this.classifyInterviewerTurnToQuestion(interviewerTurnText);
-                
-                if (classification.questionId) {
-                    // Activate the matched question
-                    this._activateQuestion(
-                        classification.questionId, 
-                        Date.now(), 
-                        interviewerTurnText
-                    );
-                } else {
-                    console.log(`[ResearchService] Question pattern detected but no study question match (off-script)`);
-                }
-            } else {
-                console.log(`[ResearchService] Interviewer speaking but no question pattern: "${interviewerTurnText.substring(0, 50)}..."`);
-            }
-        }
-        
-        // Method 2: Process AI updates for currently active question only (no auto-switching)
-        console.log(`[ResearchService] Processing AI updates for active question only...`);
+        // Process AI updates for currently active question only (no auto-switching from AI)
         if (analysis.question_updates && this.currentQuestionBeingAsked) {
-            console.log(`[ResearchService] Found ${analysis.question_updates.length} question updates`);
+            console.log(`[ResearchService] Processing AI updates for active question only...`);
             
             // Only process updates for the currently active question
             const activeQuestionUpdates = analysis.question_updates.filter(update => 
@@ -1035,9 +1241,9 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
             
             if (activeQuestionUpdates.length > 0) {
                 const update = activeQuestionUpdates[0];
-                console.log(`[ResearchService] Processing update for active question ${update.questionId.substring(0, 8)}: score=${update.completeness_score}, status=${update.status}`);
+                console.log(`[ResearchService] Processing AI update for active question ${update.questionId.substring(0, 8)}: score=${update.completeness_score}, status=${update.status}`);
                 
-                // Apply monotonic update instead of direct assignment
+                // Apply monotonic update for the active question
                 this._applyMonotonicUpdate(update.questionId, {
                     new_completeness: update.completeness_score,
                     needs_clarification: update.follow_up_needed || update.status === 'needs_clarification',
@@ -1049,68 +1255,12 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
             const ignoredUpdates = analysis.question_updates.filter(update => 
                 update.questionId !== this.currentQuestionBeingAsked
             );
-            console.log(`[ResearchService] Ignoring ${ignoredUpdates.length} AI-suggested question switches; interviewer not detected`);
-        } else {
-            console.log(`[ResearchService] Ignoring AI updates - no active interviewer question`);
-            
-            // Fallback: Check if AI analysis suggests a question became active
-            if (analysis.question_updates && analysis.question_updates.length > 0) {
-                const activeUpdate = analysis.question_updates.find(update => 
-                    update.status === 'partial' || update.status === 'in_progress'
-                );
-                
-                if (activeUpdate && !this.currentQuestionBeingAsked) {
-                    console.log('[ResearchService] AI Fallback: Question appears to be active based on AI analysis');
-                    
-                    const question = this.activeQuestions.get(activeUpdate.questionId);
-                    if (question) {
-                        console.log(`[ResearchService] Setting question ${activeUpdate.questionId} as current via AI fallback`);
-                        
-                        // Set as current question
-                        this.currentQuestionBeingAsked = activeUpdate.questionId;
-                        
-                        // Emit current question changed event
-                        this.emit('current-question-changed', {
-                            questionId: activeUpdate.questionId,
-                            question: question,
-                            detectionData: {
-                                type: 'ai_fallback',
-                                score: 0.8, // High confidence since AI detected it
-                                confidence: 'high'
-                            }
-                        });
-                        
-                        console.log('[ResearchService] AI fallback question detection triggered');
-                    }
-                }
+            if (ignoredUpdates.length > 0) {
+                console.log(`[ResearchService] Ignoring ${ignoredUpdates.length} AI-suggested question switches; using speech completion detection instead`);
             }
-        }
-        
-        // Method 3: Handle participant responses for active question only
-        const participantText = transcriptSegments
-            .filter(seg => !INTERVIEWER_SPEAKERS.has(seg.speaker))
-            .map(seg => seg.text)
-            .join(' ');
-            
-        if (participantText.trim()) {
-            this.metrics.participantTurns++;
-            
-            if (this.currentQuestionBeingAsked) {
-                // Accumulate answer for active question
-                this.currentAnswerBeingGiven = concatClean(this.currentAnswerBeingGiven, participantText);
-                
-                // Keep answer reasonably sized (last 500 characters)
-                if (this.currentAnswerBeingGiven.length > 500) {
-                    this.currentAnswerBeingGiven = '...' + this.currentAnswerBeingGiven.slice(-500);
-                }
-                
-                console.log(`[ResearchService] Participant response added to active question ${this.currentQuestionBeingAsked.substring(0, 8)}: "${participantText.substring(0, 100)}..."`);
-                
-                // TODO: Add debounced incremental scoring here later
-            } else {
-                // No active question - treat as pre/post talk
-                console.log(`[ResearchService] Participant pre/post talk (no active question): "${participantText.substring(0, 50)}..."`);
-            }
+        } else if (analysis.question_updates && analysis.question_updates.length > 0 && !this.currentQuestionBeingAsked) {
+            // Fallback: If AI suggests a question is active but we have no active question from speech detection
+            console.log('[ResearchService] AI suggests question activity but no active question from speech detection - this may indicate an issue');
         }
         
         // Log current state for debugging
@@ -1119,7 +1269,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
             console.log(`[ResearchService] Current question: "${question?.question_text?.substring(0, 50)}..."`);
             console.log(`[ResearchService] Current answer: "${this.currentAnswerBeingGiven?.substring(0, 100)}..."`);
         } else {
-            console.log(`[ResearchService] No current question identified`);
+            console.log(`[ResearchService] No current question identified from speech completion detection`);
         }
     }
 
@@ -1265,14 +1415,24 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
     }
 
     shouldSuggestFollowUps() {
+        console.log(`[ResearchService] 🔍 DEBUG: Checking if should suggest follow-ups...`);
+        
         // Don't suggest follow-ups if we have no active question context
         if (!this.currentQuestionBeingAsked) {
+            console.log(`[ResearchService] 🔍 DEBUG: No active question - currentQuestionBeingAsked is ${this.currentQuestionBeingAsked}`);
             return false;
         }
         
+        console.log(`[ResearchService] 🔍 DEBUG: Active question: ${this.currentQuestionBeingAsked?.substring(0, 8)}...`);
+        
         // Check the completeness of current and recent questions
         const currentResponse = this.questionResponses.get(this.currentQuestionBeingAsked);
-        if (!currentResponse) return false;
+        if (!currentResponse) {
+            console.log(`[ResearchService] 🔍 DEBUG: No response found for active question`);
+            return false;
+        }
+        
+        console.log(`[ResearchService] 🔍 DEBUG: Current response - score: ${currentResponse.completeness_score}, status: ${currentResponse.status}`);
         
         // Only suggest if the current question needs more detail
         const needsMoreDetail = currentResponse.completeness_score < 0.7 || 
@@ -1280,15 +1440,19 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
                                currentResponse.status === 'needs_clarification';
         
         if (!needsMoreDetail) {
-            console.log(`[ResearchService] Current question sufficiently complete (score: ${currentResponse.completeness_score}, status: ${currentResponse.status})`);
+            console.log(`[ResearchService] 🔍 DEBUG: Current question sufficiently complete (score: ${currentResponse.completeness_score}, status: ${currentResponse.status})`);
             return false;
         }
         
+        console.log(`[ResearchService] 🔍 DEBUG: Question needs more detail - checking other conditions...`);
+        
         // Don't suggest if participant just started answering (give them time)
         if (this.currentAnswerBeingGiven && this.currentAnswerBeingGiven.length < 50) {
-            console.log(`[ResearchService] Participant just started answering, waiting for more content`);
+            console.log(`[ResearchService] 🔍 DEBUG: Participant just started answering (${this.currentAnswerBeingGiven.length} chars), waiting for more content`);
             return false;
         }
+        
+        console.log(`[ResearchService] 🔍 DEBUG: Current answer length: ${this.currentAnswerBeingGiven?.length || 0} chars`);
         
         // Don't suggest if we're already showing recent, relevant follow-ups
         if (this.displayedFollowUpQuestions.length > 0) {
@@ -1296,11 +1460,12 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
             const timeSinceLastFollowUp = Date.now() - mostRecentFollowUp;
             
             if (timeSinceLastFollowUp < 15000) { // Less than 15 seconds
-                console.log(`[ResearchService] Already showing recent follow-ups, waiting ${15000 - timeSinceLastFollowUp}ms`);
+                console.log(`[ResearchService] 🔍 DEBUG: Already showing recent follow-ups, waiting ${15000 - timeSinceLastFollowUp}ms`);
                 return false;
             }
         }
         
+        console.log(`[ResearchService] 🔍 DEBUG: All conditions passed - should suggest follow-ups!`);
         return true;
     }
 
@@ -1309,6 +1474,15 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
             return false;
         }
         
+        // TEMPORARILY DISABLED - Debug why no follow-ups are showing
+        console.log(`[ResearchService] 🔍 DEBUG: Evaluating suggestion: "${suggestion}"`);
+        
+        // For debugging, let's temporarily accept all suggestions that are reasonable length
+        // TODO: Re-enable strict filtering once we confirm suggestions are being generated
+        return true;
+        
+        // TO RE-ENABLE STRICT FILTERS: Delete the "return true;" line above and uncomment below:
+        /* ORIGINAL STRICT FILTERS - TEMPORARILY DISABLED FOR DEBUGGING
         const lowerSuggestion = suggestion.toLowerCase();
         
         // Filter out generic or low-value suggestions
@@ -1345,6 +1519,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
         }
         
         return true;
+        */
     }
 
     // ==================== MONOTONIC COMPLETENESS ENFORCEMENT ====================
@@ -1420,11 +1595,12 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
         this.lastInterviewerQuestionAt = timestamp;
         this.metrics.questionActivations++;
         
-        console.log(`[ResearchService] ✅ Question activated: ${questionId.substring(0, 8)} - "${question.question_text?.substring(0, 60)}..."`);
-        console.log(`[ResearchService] Interviewer turn: "${turnText.substring(0, 100)}..."`);
+        console.log(`[ResearchService] 🔍 DEBUG: ✅ Question activated: ${questionId.substring(0, 8)} - "${question.question_text?.substring(0, 60)}..."`);
+        console.log(`[ResearchService] 🔍 DEBUG: Interviewer turn: "${turnText.substring(0, 100)}..."`);
+        console.log(`[ResearchService] 🔍 DEBUG: Previous question: ${previousQuestionId?.substring(0, 8) || 'none'}`);
         
         if (previousQuestionId && previousQuestionId !== questionId) {
-            console.log(`[ResearchService] Switched from question ${previousQuestionId.substring(0, 8)}`);
+            console.log(`[ResearchService] 🔍 DEBUG: Switched from question ${previousQuestionId.substring(0, 8)}`);
         }
         
         return true;
@@ -1568,6 +1744,11 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
         const now = Date.now();
         const timeSinceLastUpdate = now - this.lastFollowUpUpdateTime;
         
+        console.log(`[ResearchService] 🔍 DEBUG: updateFollowUpQuestions called with ${newSuggestions?.length || 0} suggestions`);
+        if (newSuggestions && newSuggestions.length > 0) {
+            console.log(`[ResearchService] 🔍 DEBUG: Raw suggestions from AI:`, newSuggestions);
+        }
+        
         // Quality filter: Only keep follow-ups that are actually needed
         const filteredSuggestions = this.filterHighQualityFollowUps(newSuggestions);
         
@@ -1575,8 +1756,8 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
         this.bestFollowUpQuestions = filteredSuggestions.slice(0, 2);
         this.followUpQuestionMetrics.totalSuggested += newSuggestions.length;
         
-        console.log(`[ResearchService] Received ${newSuggestions.length} raw suggestions, filtered to ${filteredSuggestions.length} high-quality ones`);
-        console.log(`[ResearchService] Time since last follow-up update: ${timeSinceLastUpdate}ms`);
+        console.log(`[ResearchService] 🔍 DEBUG: Received ${newSuggestions.length} raw suggestions, filtered to ${filteredSuggestions.length} high-quality ones`);
+        console.log(`[ResearchService] 🔍 DEBUG: Time since last follow-up update: ${timeSinceLastUpdate}ms`);
         
         // Always expire old questions first
         this.expireOldFollowUpQuestions(now);
@@ -1585,7 +1766,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
         const shouldUpdateFollowUps = this._shouldUpdateDisplayedFollowUps(filteredSuggestions, timeSinceLastUpdate);
         
         if (shouldUpdateFollowUps && filteredSuggestions.length > 0) {
-            console.log(`[ResearchService] Updating displayed follow-up questions`);
+            console.log(`[ResearchService] 🔍 DEBUG: Updating displayed follow-up questions`);
             this.lastFollowUpUpdateTime = now;
             
             // Add new questions that aren't already displayed
@@ -1598,7 +1779,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
                         id: `followup_${now}_${Math.random().toString(36).substr(2, 9)}`
                     });
                     this.metrics.followUpsShown++;
-                    console.log(`[ResearchService] Added new follow-up question to display:`, suggestion);
+                    console.log(`[ResearchService] 🔍 DEBUG: Added new follow-up question to display:`, suggestion);
                 }
             }
             
@@ -1610,13 +1791,13 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
             }
         } else {
             if (filteredSuggestions.length === 0) {
-                console.log(`[ResearchService] No high-quality follow-ups to display`);
+                console.log(`[ResearchService] 🔍 DEBUG: No high-quality follow-ups to display`);
             } else {
-                console.log(`[ResearchService] Skipping follow-up update - too soon or no significant changes`);
+                console.log(`[ResearchService] 🔍 DEBUG: Skipping follow-up update - too soon or no significant changes`);
             }
         }
         
-        console.log(`[ResearchService] Currently displaying ${this.displayedFollowUpQuestions.length} follow-up questions`);
+        console.log(`[ResearchService] 🔍 DEBUG: Currently displaying ${this.displayedFollowUpQuestions.length} follow-up questions:`, this.displayedFollowUpQuestions.map(q => q.text));
     }
     
     _shouldUpdateDisplayedFollowUps(newSuggestions, timeSinceLastUpdate) {

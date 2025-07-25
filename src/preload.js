@@ -349,6 +349,13 @@ contextBridge.exposeInMainWorld('api', {
     markFollowUpAsked: (questionId, response) => ipcRenderer.invoke('research:mark-followup-asked', { questionId, response }),
     getFollowUpMetrics: () => ipcRenderer.invoke('research:get-followup-metrics'),
 
+    // Screen recording
+    saveScreenRecording: (data) => ipcRenderer.invoke('research:saveScreenRecording', data),
+    reportRecordingError: (error) => ipcRenderer.invoke('research:reportRecordingError', error),
+    getRecordings: () => ipcRenderer.invoke('research:getRecordings'),
+    deleteRecording: (filename) => ipcRenderer.invoke('research:deleteRecording', filename),
+    openRecordingsDirectory: () => ipcRenderer.invoke('research:openRecordingsDirectory'),
+
     // Event Listeners
     onSessionStarted: (callback) => ipcRenderer.on('research:session-started', callback),
     onSessionEnded: (callback) => ipcRenderer.on('research:session-ended', callback),
@@ -374,7 +381,11 @@ contextBridge.exposeInMainWorld('api', {
     removeOnCurrentQuestionChanged: (callback) => ipcRenderer.removeListener('research:current-question-changed', callback),
     removeOnAmbiguousQuestionDetected: (callback) => ipcRenderer.removeListener('research:ambiguous-question-detected', callback),
     removeOnOffScriptQuestionDetected: (callback) => ipcRenderer.removeListener('research:off-script-question-detected', callback),
-    removeOnQuestionDetectionUpdate: (callback) => ipcRenderer.removeListener('research:question-detection-update', callback)
+    removeOnQuestionDetectionUpdate: (callback) => ipcRenderer.removeListener('research:question-detection-update', callback),
+    onScreenRecordingStarted: (callback) => ipcRenderer.on('research:screen-recording-started', callback),
+    onScreenRecordingStopped: (callback) => ipcRenderer.on('research:screen-recording-stopped', callback),
+    removeOnScreenRecordingStarted: (callback) => ipcRenderer.removeListener('research:screen-recording-started', callback),
+    removeOnScreenRecordingStopped: (callback) => ipcRenderer.removeListener('research:screen-recording-stopped', callback)
   }
 });
 
@@ -385,4 +396,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
     send: (channel, ...args) => ipcRenderer.send(channel, ...args)
   }
+});
+
+// Internal bridge for screen recording events
+contextBridge.exposeInMainWorld('internalBridge', {
+  on: (eventName, callback) => ipcRenderer.on(eventName, callback),
+  removeListener: (eventName, callback) => ipcRenderer.removeListener(eventName, callback)
 });

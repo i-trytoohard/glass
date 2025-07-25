@@ -138,6 +138,19 @@ function createStreamingLLM(provider, opts) {
   return handler.createStreamingLLM(opts);
 }
 
+function createEmbedding(provider, opts) {
+  if (provider === 'openai-glass') provider = 'openai';
+  
+  const handler = PROVIDERS[provider]?.handler();
+  if (!handler?.createEmbedding) {
+      throw new Error(`Embeddings not supported for provider: ${provider}`);
+  }
+  if (opts && opts.model) {
+    opts = { ...opts, model: sanitizeModelId(opts.model) };
+  }
+  return handler.createEmbedding(opts);
+}
+
 function getProviderClass(providerId) {
     const providerConfig = PROVIDERS[providerId];
     if (!providerConfig) return null;
@@ -180,6 +193,7 @@ module.exports = {
   createSTT,
   createLLM,
   createStreamingLLM,
+  createEmbedding,
   getProviderClass,
   getAvailableProviders,
 };

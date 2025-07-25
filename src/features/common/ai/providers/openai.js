@@ -300,9 +300,70 @@ function createStreamingLLM({ apiKey, model = 'gpt-4.1', temperature = 0.7, maxT
   };
 }
 
+/**
+ * Creates an OpenAI Embedding client
+ * @param {object} opts - Configuration options
+ * @param {string} opts.apiKey - OpenAI API key
+ * @param {string} [opts.model='text-embedding-3-small'] - Embedding model
+ * @param {boolean} [opts.usePortkey=false] - Whether to use Portkey
+ * @param {string} [opts.portkeyVirtualKey] - Portkey virtual key
+ * @returns {object} Embedding client
+ */
+function createEmbedding({ apiKey, model = 'text-embedding-3-small', usePortkey = false, portkeyVirtualKey }) {
+  const keyType = usePortkey ? 'vKey' : 'apiKey';
+  const key = usePortkey ? (portkeyVirtualKey || apiKey) : apiKey;
+
+  return {
+    /**
+     * Generate embeddings for text
+     * @param {string|string[]} input - Text or array of texts to embed
+     * @returns {Promise<Array>} Array of embedding vectors
+     */
+    async embed(input) {
+      const fetchUrl = keyType === 'apiKey' 
+        ? 'https://api.openai.com/v1/embeddings'
+        : 'https://api.portkey.ai/v1/embeddings';
+
+      const headers = keyType === 'apiKey'
+        ? {
+            'Authorization': `Bearer ${key}`,
+            'Content-Type': 'application/json',
+          }
+        : {
+            'x-portkey-api-key': 'gRv2UGRMq6GGLJ8aVEB4e7adIewu',
+            'x-portkey-virtual-key': key,
+            'Content-Type': 'application/json',
+          };
+
+      const response = await fetch(fetchUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: model,
+          input: input,
+          encoding_format: 'float'
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`OpenAI Embeddings API error: ${response.status} ${response.statusText} - ${errorData.error?.message || 'Unknown error'}`);
+      }
+
+      const data = await response.json();
+      
+      // Return array of embeddings (or single embedding if input was string)
+      return Array.isArray(input) 
+        ? data.data.map(item => item.embedding)
+        : data.data[0].embedding;
+    }
+  };
+}
+
 module.exports = {
     OpenAIProvider,
     createSTT,
     createLLM,
-    createStreamingLLM
+    createStreamingLLM,
+    createEmbedding
 }; 

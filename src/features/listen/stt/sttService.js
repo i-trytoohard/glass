@@ -1,5 +1,7 @@
 const { BrowserWindow } = require('electron');
 const { spawn } = require('child_process');
+const fs = require('fs').promises;
+const path = require('path');
 const { createSTT } = require('../../common/ai/factory');
 const modelStateService = require('../../common/services/modelStateService');
 
@@ -45,6 +47,200 @@ class SttService {
         this.onStatusUpdate = null;
 
         this.modelInfo = null; 
+        
+        // Audio logging configuration
+        this.audioLoggingEnabled = process.env.GLASS_AUDIO_LOGGING !== 'false'; // Enable by default
+        this.audioLogDir = null;
+        this.sessionStartTime = null;
+        this.audioChunkCounter = 0;
+        
+        // Initialize audio logging
+        this.initializeAudioLogging();
+    }
+
+    /**
+     * Initialize audio logging directory and setup
+     */
+    async initializeAudioLogging() {
+        if (!this.audioLoggingEnabled) {
+            console.log('[SttService] Audio logging disabled');
+            return;
+        }
+
+        try {
+            const { app } = require('electron');
+            const logsBaseDir = path.join(app.getPath('userData'), 'audio-logs');
+            
+            // Create session-specific directory with timestamp
+            this.sessionStartTime = new Date();
+            const sessionDirName = this.sessionStartTime.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            this.audioLogDir = path.join(logsBaseDir, sessionDirName);
+            
+            // Ensure directories exist
+            await fs.mkdir(this.audioLogDir, { recursive: true });
+            
+            // Create separate directories for mic and system audio
+            await fs.mkdir(path.join(this.audioLogDir, 'mic'), { recursive: true });
+            await fs.mkdir(path.join(this.audioLogDir, 'system'), { recursive: true });
+            
+            console.log(`[SttService] Audio logging initialized: ${this.audioLogDir}`);
+            
+            // Create session metadata file
+            const metadata = {
+                sessionStart: this.sessionStartTime.toISOString(),
+                sampleRate: 24000,
+                format: 'pcm16',
+                channels: 1,
+                chunkDuration: '100ms'
+            };
+            
+            await fs.writeFile(
+                path.join(this.audioLogDir, 'session-metadata.json'),
+                JSON.stringify(metadata, null, 2)
+            );
+            
+            // Create README for users
+            await this.createLogReadme();
+            
+        } catch (error) {
+            console.error('[SttService] Failed to initialize audio logging:', error);
+            this.audioLoggingEnabled = false;
+        }
+    }
+
+    /**
+     * Save audio chunk to disk for logging
+     * @param {string} audioData - Base64 encoded audio data
+     * @param {string} audioType - 'mic' or 'system'
+     * @param {string} mimeType - Audio MIME type
+     */
+    async saveAudioChunk(audioData, audioType, mimeType = 'audio/pcm;rate=24000') {
+        if (!this.audioLoggingEnabled || !this.audioLogDir) {
+            return;
+        }
+
+        try {
+            const timestamp = new Date().toISOString();
+            const chunkId = String(this.audioChunkCounter++).padStart(6, '0');
+            const filename = `${timestamp.replace(/[:.]/g, '-')}_${chunkId}.pcm`;
+            const filepath = path.join(this.audioLogDir, audioType, filename);
+            
+            // Convert base64 to buffer and save
+            const audioBuffer = Buffer.from(audioData, 'base64');
+            await fs.writeFile(filepath, audioBuffer);
+            
+            // Create chunk metadata
+            const chunkMetadata = {
+                timestamp,
+                chunkId: parseInt(chunkId),
+                audioType,
+                mimeType,
+                sizeBytes: audioBuffer.length,
+                filename
+            };
+            
+            const metadataPath = path.join(this.audioLogDir, audioType, `${timestamp.replace(/[:.]/g, '-')}_${chunkId}.json`);
+            await fs.writeFile(metadataPath, JSON.stringify(chunkMetadata, null, 2));
+            
+        } catch (error) {
+            console.error(`[SttService] Failed to save ${audioType} audio chunk:`, error);
+        }
+    }
+
+    /**
+     * Get audio logging status and statistics
+     */
+    getAudioLoggingInfo() {
+        return {
+            enabled: this.audioLoggingEnabled,
+            logDirectory: this.audioLogDir,
+            sessionStart: this.sessionStartTime,
+            chunksLogged: this.audioChunkCounter
+        };
+    }
+
+    /**
+     * Clean up old audio log directories (keep last N sessions)
+     * @param {number} keepSessions - Number of recent sessions to keep (default: 10)
+     */
+    async cleanupOldAudioLogs(keepSessions = 10) {
+        if (!this.audioLoggingEnabled) {
+            return;
+        }
+
+        try {
+            const { app } = require('electron');
+            const logsBaseDir = path.join(app.getPath('userData'), 'audio-logs');
+            
+            const entries = await fs.readdir(logsBaseDir, { withFileTypes: true });
+            const sessionDirs = entries
+                .filter(entry => entry.isDirectory())
+                .map(entry => ({
+                    name: entry.name,
+                    path: path.join(logsBaseDir, entry.name),
+                    timestamp: entry.name // ISO format sorts chronologically
+                }))
+                .sort((a, b) => b.timestamp.localeCompare(a.timestamp)); // Most recent first
+
+            // Keep only the most recent sessions
+            const dirsToDelete = sessionDirs.slice(keepSessions);
+            
+            for (const dir of dirsToDelete) {
+                await fs.rm(dir.path, { recursive: true, force: true });
+                console.log(`[SttService] Cleaned up old audio logs: ${dir.name}`);
+            }
+            
+            console.log(`[SttService] Audio log cleanup complete. Kept ${Math.min(sessionDirs.length, keepSessions)} sessions.`);
+            
+        } catch (error) {
+            console.error('[SttService] Failed to cleanup old audio logs:', error);
+        }
+    }
+
+    /**
+     * Disable audio logging for current session
+     */
+    disableAudioLogging() {
+        console.log('[SttService] Audio logging disabled for current session');
+        this.audioLoggingEnabled = false;
+    }
+
+    /**
+     * Create a README file in the log directory explaining the format
+     */
+    async createLogReadme() {
+        if (!this.audioLogDir) return;
+        
+        const readmeContent = `# Glass Audio Logs
+
+This directory contains raw audio data captured before being sent to STT providers.
+
+## Directory Structure
+- \`mic/\` - Microphone audio (researcher questions)
+- \`system/\` - System audio (participant responses)  
+- \`session-metadata.json\` - Session configuration and timing
+
+## File Format
+- \`*.pcm\` - Raw PCM16 audio data (24kHz, mono, 16-bit)
+- \`*.json\` - Metadata for each audio chunk
+
+## Usage
+To convert PCM files to WAV for playback:
+\`\`\`bash
+ffmpeg -f s16le -ar 24000 -ac 1 -i input.pcm output.wav
+\`\`\`
+
+## Privacy Note
+These files contain raw audio data. Handle according to your privacy and data retention policies.
+
+Generated: ${new Date().toISOString()}
+`;
+
+        try {
+            await fs.writeFile(path.join(this.audioLogDir, 'README.md'), readmeContent);
+        } catch (error) {
+            console.error('[SttService] Failed to create README:', error);
+        }
     }
 
     setCallbacks({ onTranscriptionComplete, onStatusUpdate }) {
@@ -576,6 +772,9 @@ class SttService {
             throw new Error('User STT session not active');
         }
 
+        // Log audio chunk before processing
+        await this.saveAudioChunk(data, 'mic', mimeType);
+
         let modelInfo = this.modelInfo;
         if (!modelInfo) {
             console.warn('[SttService] modelInfo not found, fetching on-the-fly as a fallback...');
@@ -600,6 +799,9 @@ class SttService {
         if (!this.theirSttSession) {
             throw new Error('Their STT session not active');
         }
+
+        // Log audio chunk before processing  
+        await this.saveAudioChunk(data, 'system', mimeType);
 
         let modelInfo = this.modelInfo;
         if (!modelInfo) {

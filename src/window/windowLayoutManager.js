@@ -259,7 +259,7 @@ class WindowLayoutManager {
                 x: Math.round(xRel + workAreaX), 
                 y: Math.round(yPos + workAreaY), 
                 width: winB.width, 
-                height: Math.max(winB.height, 800) // Ensure minimum height of 800px
+                height: winB.height
             };
         }
         return layout;

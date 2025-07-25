@@ -521,7 +521,7 @@ function createFeatureWindows(header, namesToCreate) {
         switch (name) {
             case 'listen': {
                 const listen = new BrowserWindow({
-                    ...commonChildOptions, width:800, height:800, minWidth:400, minHeight:400, maxWidth:1200, maxHeight:1200, resizable: true,
+                    ...commonChildOptions, width:800, height:600, minWidth:400, minHeight:400, maxWidth:1200, maxHeight:1200, resizable: true,
                 });
                 listen.setContentProtection(isContentProtectionOn);
                 listen.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});

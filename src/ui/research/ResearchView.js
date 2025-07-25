@@ -6,7 +6,15 @@ export class ResearchView extends LitElement {
     static styles = css`
         :host {
             display: block;
-            color: white;
+            width: 100%;
+            height: 100vh; /* Use viewport height instead of 100% */
+            max-height: 100vh; /* Ensure it never exceeds viewport */
+            overflow: hidden; /* Host should not scroll */
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+            font-size: 13px;
+            line-height: 1.4;
+            color: var(--text-color, #333);
+            background: transparent;
         }
 
         .research-container {
@@ -184,15 +192,6 @@ export class ResearchView extends LitElement {
             border-radius: 4px;
         }
 
-        .question-priority {
-            padding: 2px 6px;
-            border-radius: 4px;
-        }
-
-        .question-priority.high { background: #fed7d7; color: #c53030; }
-        .question-priority.medium { background: #feebc8; color: #c05621; }
-        .question-priority.low { background: #c6f6d5; color: #2f855a; }
-
         .question-actions {
             display: flex;
             gap: 6px;
@@ -250,8 +249,6 @@ export class ResearchView extends LitElement {
             flex-direction: column;
             gap: 10px;
             padding-bottom: 20px;
-            flex: 1 1 auto;
-            min-height: 0;
         }
 
         .session-status {
@@ -620,18 +617,6 @@ export class ResearchView extends LitElement {
             gap: 6px;
         }
 
-        .status-badge {
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 10px;
-            text-transform: uppercase;
-            font-weight: 600;
-        }
-
-        .status-badge.partial { background: #fbb6ce; color: #97266d; }
-        .status-badge.complete { background: #9ae6b4; color: #2f855a; }
-        .status-badge.needs-clarification { background: #fbd38d; color: #c05621; }
-
         /* Session Controls */
         .session-controls {
             display: flex;
@@ -670,40 +655,6 @@ export class ResearchView extends LitElement {
             color: #fc8181;
         }
 
-        .confidence-ribbon {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-top: 8px;
-            padding: 4px 8px;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 4px;
-            font-size: 11px;
-            color: rgba(255, 255, 255, 0.7);
-        }
-
-        .confidence-score {
-            font-weight: 500;
-            color: white;
-        }
-
-        .confidence-score.high { color: #68d391; }
-        .confidence-score.medium { color: #ffd93d; }
-        .confidence-score.low { color: #fc8181; }
-
-        .detection-type {
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 10px;
-            text-transform: uppercase;
-            font-weight: 500;
-        }
-
-        .detection-type.scripted { background: #68d391; color: #1a202c; }
-        .detection-type.ambiguous { background: #ffd93d; color: #1a202c; }
-        .detection-type.off_script { background: #fc8181; color: #1a202c; }
-        .detection-type.manual_override { background: #9f7aea; color: white; }
-
         .question-shortcuts-hint {
             position: absolute;
             top: 8px;
@@ -715,16 +666,6 @@ export class ResearchView extends LitElement {
             border-radius: 4px;
         }
 
-        .off-script-badge {
-            display: inline-block;
-            background: rgba(245, 101, 101, 0.2);
-            color: #fc8181;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 10px;
-            font-weight: 500;
-            margin-left: 8px;
-        }
     `;
 
     static properties = {
@@ -768,6 +709,181 @@ export class ResearchView extends LitElement {
         this.lastDetectionUpdate = null;
         
         console.log('[ResearchView] Constructor - Component initialized');
+    }
+
+    firstUpdated() {
+        super.firstUpdated();
+        this._initializeShortcuts();
+        this._startDetectionService();
+        
+        // NEW: Initialize screen recording client
+        this._initializeScreenRecording();
+        
+        // Debug scrolling - log dimensions and styles
+        this._debugScrolling();
+        
+        // Re-check after a delay to ensure layout is complete
+        setTimeout(() => this._debugScrolling(), 1000);
+        
+        // Listen for window resize to debug dynamic changes
+        window.addEventListener('resize', () => {
+            console.log('[ResearchView] Window resized, re-checking scroll...');
+            setTimeout(() => this._debugScrolling(), 100);
+        });
+    }
+
+    /**
+     * Initialize screen recording client
+     */
+    async _initializeScreenRecording() {
+        try {
+            console.log('[ResearchView] Initializing screen recording client...');
+            
+            // Dynamically import the screen recording client
+            const script = document.createElement('script');
+            script.src = './screenRecording.client.js';
+            script.type = 'module';
+            
+            script.onload = () => {
+                console.log('[ResearchView] Screen recording client loaded successfully');
+                
+                // Listen for screen recording events
+                if (window.api?.research) {
+                    window.api.research.onScreenRecordingStarted((event, data) => {
+                        console.log('[ResearchView] Screen recording started:', data);
+                        // Could update UI to show recording indicator
+                    });
+                    
+                    window.api.research.onScreenRecordingStopped((event, data) => {
+                        console.log('[ResearchView] Screen recording stopped:', data);
+                        // Could update UI to show recording saved
+                    });
+                }
+            };
+            
+            script.onerror = (error) => {
+                console.error('[ResearchView] Failed to load screen recording client:', error);
+            };
+            
+            document.head.appendChild(script);
+            
+        } catch (error) {
+            console.error('[ResearchView] Error initializing screen recording:', error);
+        }
+    }
+
+    _debugScrolling() {
+        console.log('\n=== SCROLL DEBUG START ===');
+        
+        // 1. Window dimensions
+        console.log('Window dimensions:', {
+            innerWidth: window.innerWidth,
+            innerHeight: window.innerHeight,
+            outerWidth: window.outerWidth,
+            outerHeight: window.outerHeight
+        });
+        
+        // 2. Host element (:host)
+        const hostRect = this.getBoundingClientRect();
+        const hostStyles = getComputedStyle(this);
+        console.log('Host element (:host):', {
+            rect: { width: hostRect.width, height: hostRect.height },
+            computedHeight: hostStyles.height,
+            overflow: hostStyles.overflow,
+            overflowY: hostStyles.overflowY
+        });
+        
+        // 2b. Check if height fix worked
+        const heightFixWorking = hostRect.height <= window.innerHeight;
+        console.log(`🔧 Height fix status: ${heightFixWorking ? '✅ WORKING' : '❌ FAILED'}`, {
+            hostHeight: hostRect.height,
+            windowHeight: window.innerHeight,
+            difference: hostRect.height - window.innerHeight
+        });
+        
+        // 3. Research container
+        const container = this.shadowRoot?.querySelector('.research-container');
+        if (container) {
+            const containerRect = container.getBoundingClientRect();
+            const containerStyles = getComputedStyle(container);
+            console.log('Research container:', {
+                rect: { width: containerRect.width, height: containerRect.height },
+                computedHeight: containerStyles.height,
+                overflow: containerStyles.overflow,
+                overflowY: containerStyles.overflowY,
+                scrollHeight: container.scrollHeight,
+                clientHeight: container.clientHeight,
+                scrollTop: container.scrollTop,
+                canScroll: container.scrollHeight > container.clientHeight
+            });
+            
+            // 4. Add scroll event listener for debugging
+            container.addEventListener('scroll', (e) => {
+                console.log('[ResearchView] Scroll event:', {
+                    scrollTop: container.scrollTop,
+                    scrollHeight: container.scrollHeight,
+                    clientHeight: container.clientHeight,
+                    remainingScroll: container.scrollHeight - container.clientHeight - container.scrollTop
+                });
+            });
+            
+            // 5. Test programmatic scroll
+            console.log('Testing programmatic scroll...');
+            const originalScrollTop = container.scrollTop;
+            container.scrollTop = 50;
+            setTimeout(() => {
+                const newScrollTop = container.scrollTop;
+                console.log('Programmatic scroll test:', {
+                    original: originalScrollTop,
+                    attempted: 50,
+                    actual: newScrollTop,
+                    scrollWorked: newScrollTop !== originalScrollTop
+                });
+                container.scrollTop = originalScrollTop; // Reset
+            }, 100);
+        } else {
+            console.log('Research container not found!');
+        }
+        
+        // 6. Live dashboard dimensions (the main content)
+        const liveDashboard = this.shadowRoot?.querySelector('.live-dashboard');
+        if (liveDashboard) {
+            const dashboardRect = liveDashboard.getBoundingClientRect();
+            console.log('Live dashboard:', {
+                rect: { width: dashboardRect.width, height: dashboardRect.height },
+                scrollHeight: liveDashboard.scrollHeight,
+                clientHeight: liveDashboard.clientHeight
+            });
+        }
+        
+        // 7. All sections heights
+        const sections = this.shadowRoot?.querySelectorAll('.section');
+        let totalSectionsHeight = 0;
+        if (sections) {
+            sections.forEach((section, index) => {
+                const rect = section.getBoundingClientRect();
+                totalSectionsHeight += rect.height;
+                console.log(`Section ${index}:`, {
+                    class: section.className,
+                    height: rect.height
+                });
+            });
+            console.log('Total sections height:', totalSectionsHeight);
+        }
+        
+        console.log('=== SCROLL DEBUG END ===\n');
+    }
+
+    _initializeShortcuts() {
+        console.log('[ResearchView] Initializing shortcuts...');
+        // Shortcut initialization code will go here
+        // For now, just a placeholder
+    }
+
+    _startDetectionService() {
+        console.log('[ResearchView] Starting detection service...');
+        // Detection service startup code will go here  
+        // For now, just a placeholder
     }
 
     connectedCallback() {
@@ -958,7 +1074,7 @@ export class ResearchView extends LitElement {
         
         if (question) {
             this.currentQuestion = {
-                questionText: question.text,
+                questionText: question.question_text,
                 category: question.category || 'general',
                 priority: question.priority || 'medium',
                 status: 'in_progress',
@@ -1162,20 +1278,6 @@ export class ResearchView extends LitElement {
                             <div class="current-question-display">
                                 <div class="question-text">${this.currentQuestion.questionText}</div>
                                 
-                                ${this.currentQuestion.detectionConfidence !== undefined ? html`
-                                    <div class="confidence-ribbon">
-                                        <span>Match:</span>
-                                        <span class="confidence-score ${this._getConfidenceClass(this.currentQuestion.detectionConfidence)}">
-                                            ${Math.round(this.currentQuestion.detectionConfidence * 100)}%
-                                        </span>
-                                        ${this.currentQuestion.detectionType ? html`
-                                            <span class="detection-type ${this.currentQuestion.detectionType}">
-                                                ${this.currentQuestion.detectionType.replace('_', '-')}
-                                            </span>
-                                        ` : ''}
-                                    </div>
-                                ` : ''}
-                                
                                 <div class="answer-section">
                                     <div class="answer-label">Answer:</div>
                                     <div class="answer-text">
@@ -1192,23 +1294,6 @@ export class ResearchView extends LitElement {
                             </div>
                         ` : html`
                             <div class="no-current-question">No active question detected</div>
-                        `}
-                    </div>
-                </div>
-
-                <!-- Next Question to Ask Section -->
-                <div class="section next-question">
-                    <h3 class="section-title">⏭️ Next Question to Ask</h3>
-                    <div class="next-question-content">
-                        ${this.nextQuestion ? html`
-                            <div class="next-question-display">
-                                <div class="next-question-text">${this.nextQuestion.questionText}</div>
-                                ${this.nextQuestion.reason !== 'next in sequence' ? html`
-                                    <div class="next-question-reason">Reason: ${this.nextQuestion.reason}</div>
-                                ` : ''}
-                            </div>
-                        ` : html`
-                            <div class="no-next-question">All questions addressed</div>
                         `}
                     </div>
                 </div>
@@ -1246,17 +1331,9 @@ export class ResearchView extends LitElement {
                                 <div class="question-content">
                                     <div class="question-text">
                                         ${question.text}
-                                        ${question.status === 'off_script' ? html`
-                                            <span class="off-script-badge">⚡ off-script</span>
-                                        ` : ''}
                                     </div>
                                     <div class="question-meta">
                                         <span class="question-category">${question.category}</span>
-                                        <span class="question-priority ${question.priority}">${question.priority}</span>
-                                        <span class="status-badge ${question.status}">${question.status}</span>
-                                        ${question.follow_up_needed ? html`
-                                            <span class="question-priority high">needs follow-up</span>
-                                        ` : ''}
                                     </div>
                                 </div>
                             </div>
@@ -1291,11 +1368,8 @@ export class ResearchView extends LitElement {
         `;
     }
 
-    _getConfidenceClass(score) {
-        if (score >= 0.75) return 'high';
-        if (score >= 0.5) return 'medium';
-        return 'low';
-    }
+    // ==================== INTERNAL UTILITIES ====================
+
 }
 
 console.log('[ResearchView] Defining custom element research-view');

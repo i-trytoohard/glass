@@ -159,6 +159,58 @@ module.exports = {
         return researchService.followUpQuestionMetrics;
     });
 
+    // NEW: Screen Recording Management
+    const screenRecordingService = require('../features/research/screenRecordingService');
+    
+    ipcMain.handle('research:saveScreenRecording', async (event, { sessionId, recordingData, mimeType, size }) => {
+        try {
+            console.log(`[FeatureBridge] Saving screen recording for session ${sessionId}, size: ${size} bytes`);
+            const buffer = Buffer.from(recordingData);
+            const result = await screenRecordingService.saveRecording(buffer);
+            return result;
+        } catch (error) {
+            console.error('[FeatureBridge] Failed to save screen recording:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('research:reportRecordingError', async (event, { error, sessionId }) => {
+        console.error(`[FeatureBridge] Screen recording error for session ${sessionId}:`, error);
+        // Could emit event to research service for error handling
+        researchService.emit('screen-recording-error', { error, sessionId });
+        return { success: true };
+    });
+
+    ipcMain.handle('research:getRecordings', async () => {
+        try {
+            const recordings = await screenRecordingService.getRecordings();
+            return { success: true, recordings };
+        } catch (error) {
+            console.error('[FeatureBridge] Failed to get recordings:', error);
+            return { success: false, error: error.message, recordings: [] };
+        }
+    });
+
+    ipcMain.handle('research:deleteRecording', async (event, filename) => {
+        try {
+            const result = await screenRecordingService.deleteRecording(filename);
+            return result;
+        } catch (error) {
+            console.error('[FeatureBridge] Failed to delete recording:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('research:openRecordingsDirectory', async () => {
+        try {
+            const result = await screenRecordingService.openRecordingsDirectory();
+            return result;
+        } catch (error) {
+            console.error('[FeatureBridge] Failed to open recordings directory:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
     // Research navigation handler
     ipcMain.handle('research:navigate-to-research', async () => {
         // Request navigation with toggle logic handled by window manager
@@ -336,6 +388,53 @@ module.exports = {
         BrowserWindow.getAllWindows().forEach((win) => {
             if (win && !win.isDestroyed()) {
                 win.webContents.send('research:question-detection-update', data);
+            }
+        });
+    });
+
+    // NEW: Screen Recording Events
+    researchService.on('screen-recording-started', (data) => {
+        console.log('[FeatureBridge] Broadcasting screen-recording-started event:', data);
+        BrowserWindow.getAllWindows().forEach((win) => {
+            if (win && !win.isDestroyed()) {
+                win.webContents.send('research:screen-recording-started', data);
+            }
+        });
+    });
+
+    researchService.on('screen-recording-stopped', (data) => {
+        console.log('[FeatureBridge] Broadcasting screen-recording-stopped event:', data);
+        BrowserWindow.getAllWindows().forEach((win) => {
+            if (win && !win.isDestroyed()) {
+                win.webContents.send('research:screen-recording-stopped', data);
+            }
+        });
+    });
+
+    researchService.on('screen-recording-error', (data) => {
+        console.log('[FeatureBridge] Broadcasting screen-recording-error event:', data);
+        BrowserWindow.getAllWindows().forEach((win) => {
+            if (win && !win.isDestroyed()) {
+                win.webContents.send('research:screen-recording-error', data);
+            }
+        });
+    });
+
+    // NEW: Internal bridge handlers for screen recording
+    internalBridge.on('research:startScreenRecording', (data) => {
+        console.log('[FeatureBridge] Forwarding research:startScreenRecording to renderers:', data);
+        BrowserWindow.getAllWindows().forEach((win) => {
+            if (win && !win.isDestroyed()) {
+                win.webContents.send('research:startScreenRecording', data);
+            }
+        });
+    });
+
+    internalBridge.on('research:stopScreenRecording', () => {
+        console.log('[FeatureBridge] Forwarding research:stopScreenRecording to renderers');
+        BrowserWindow.getAllWindows().forEach((win) => {
+            if (win && !win.isDestroyed()) {
+                win.webContents.send('research:stopScreenRecording');
             }
         });
     });

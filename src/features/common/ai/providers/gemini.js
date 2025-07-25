@@ -320,9 +320,66 @@ function createStreamingLLM({ apiKey, model = "gemini-2.5-flash", temperature = 
   }
 }
 
+/**
+ * Creates a Gemini Embedding client
+ * @param {object} opts - Configuration options
+ * @param {string} opts.apiKey - Gemini API key
+ * @param {string} [opts.model='text-embedding-004'] - Embedding model
+ * @returns {object} Embedding client
+ */
+function createEmbedding({ apiKey, model = 'text-embedding-004' }) {
+  return {
+    /**
+     * Generate embeddings for text using Gemini
+     * @param {string|string[]} input - Text or array of texts to embed
+     * @returns {Promise<Array>} Array of embedding vectors
+     */
+    async embed(input) {
+      const isArray = Array.isArray(input);
+      const texts = isArray ? input : [input];
+      const embeddings = [];
+
+      for (const text of texts) {
+        const fetchUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:embedContent?key=${apiKey}`;
+        
+        const response = await fetch(fetchUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            content: {
+              parts: [{
+                text: text
+              }]
+            }
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(`Gemini Embeddings API error: ${response.status} ${response.statusText} - ${errorData.error?.message || 'Unknown error'}`);
+        }
+
+        const data = await response.json();
+        
+        if (data.embedding && data.embedding.values) {
+          embeddings.push(data.embedding.values);
+        } else {
+          throw new Error('Invalid response format from Gemini embeddings API');
+        }
+      }
+
+      // Return single embedding if input was string, array if input was array
+      return isArray ? embeddings : embeddings[0];
+    }
+  };
+}
+
 module.exports = {
     GeminiProvider,
     createSTT,
     createLLM,
-    createStreamingLLM
+    createStreamingLLM,
+    createEmbedding
 };
