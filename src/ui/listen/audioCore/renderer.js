@@ -14,7 +14,7 @@ window.pickleGlass = {
 };
 
 
-window.api.renderer.onChangeListenCaptureState((_event, { status }) => {
+window.api.listenCapture.onChangeListenCaptureState((_event, { status }) => {
     // Allow capture in any view mode (including research mode)
     console.log(`[Renderer] Capture state change: ${status} (view: ${params.get('view') || 'unknown'})`);
     

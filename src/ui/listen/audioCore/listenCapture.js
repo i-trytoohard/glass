@@ -29,9 +29,29 @@ async function getAec () {
 // ---------------------------
 // Constants & Globals
 // ---------------------------
-const SAMPLE_RATE = 24000;
-const AUDIO_CHUNK_DURATION = 0.1;
-const BUFFER_SIZE = 4096;
+// Audio configuration will be loaded from main process and stored here
+let audioConfig = {
+    sampleRate: 24000,
+    chunkDuration: 0.1,
+    bufferSize: 2048,
+    format: 'pcm16',
+    channels: 1
+};
+
+// Load audio config from main process
+async function loadAudioConfig() {
+    try {
+        audioConfig = await window.api.audio.getConfig();
+        console.log('[Audio] Loaded configuration:', audioConfig);
+    } catch (error) {
+        console.warn('[Audio] Failed to load config, using defaults:', error);
+    }
+}
+
+const getAudioConfig = () => audioConfig;
+const SAMPLE_RATE = () => getAudioConfig().sampleRate;
+const AUDIO_CHUNK_DURATION = () => getAudioConfig().chunkDuration;
+const BUFFER_SIZE = () => getAudioConfig().bufferSize;
 
 const isLinux = window.api.platform.isLinux;
 const isMacOS = window.api.platform.isMacOS;
@@ -295,13 +315,13 @@ async function setupMicProcessing(micStream) {
     if (!aecPtr) aecPtr = mod.newPtr(160, 1600, 24000, 1);
 
 
-    const micAudioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
+    const micAudioContext = new AudioContext({ sampleRate: SAMPLE_RATE() });
     await micAudioContext.resume(); 
     const micSource = micAudioContext.createMediaStreamSource(micStream);
-    const micProcessor = micAudioContext.createScriptProcessor(BUFFER_SIZE, 1, 1);
+    const micProcessor = micAudioContext.createScriptProcessor(BUFFER_SIZE(), 1, 1);
 
     let audioBuffer = [];
-    const samplesPerChunk = SAMPLE_RATE * AUDIO_CHUNK_DURATION;
+    const samplesPerChunk = SAMPLE_RATE() * AUDIO_CHUNK_DURATION();
 
     micProcessor.onaudioprocess = (e) => {
         const inputData = e.inputBuffer.getChannelData(0);
@@ -344,12 +364,12 @@ async function setupMicProcessing(micStream) {
 
 function setupLinuxMicProcessing(micStream) {
     // Setup microphone audio processing for Linux
-    const micAudioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
+    const micAudioContext = new AudioContext({ sampleRate: SAMPLE_RATE() });
     const micSource = micAudioContext.createMediaStreamSource(micStream);
-    const micProcessor = micAudioContext.createScriptProcessor(BUFFER_SIZE, 1, 1);
+    const micProcessor = micAudioContext.createScriptProcessor(BUFFER_SIZE(), 1, 1);
 
     let audioBuffer = [];
-    const samplesPerChunk = SAMPLE_RATE * AUDIO_CHUNK_DURATION;
+    const samplesPerChunk = SAMPLE_RATE() * AUDIO_CHUNK_DURATION();
 
     micProcessor.onaudioprocess = async e => {
         const inputData = e.inputBuffer.getChannelData(0);
@@ -376,12 +396,12 @@ function setupLinuxMicProcessing(micStream) {
 }
 
 function setupSystemAudioProcessing(systemStream) {
-    const systemAudioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
+    const systemAudioContext = new AudioContext({ sampleRate: SAMPLE_RATE() });
     const systemSource = systemAudioContext.createMediaStreamSource(systemStream);
-    const systemProcessor = systemAudioContext.createScriptProcessor(BUFFER_SIZE, 1, 1);
+    const systemProcessor = systemAudioContext.createScriptProcessor(BUFFER_SIZE(), 1, 1);
 
     let audioBuffer = [];
-    const samplesPerChunk = SAMPLE_RATE * AUDIO_CHUNK_DURATION;
+    const samplesPerChunk = SAMPLE_RATE() * AUDIO_CHUNK_DURATION();
 
     systemProcessor.onaudioprocess = async e => {
         const inputData = e.inputBuffer.getChannelData(0);
@@ -414,7 +434,124 @@ function setupSystemAudioProcessing(systemStream) {
 // ---------------------------
 // Main capture functions (exact from renderer.js)
 // ---------------------------
+
+// Global references for cleanup and tracking
+let captureCleanupFunctions = [];
+let isCapturing = false; // Track capture state
+
+async function stopCapture() {
+    console.log('[listenCapture] stopCapture() called - beginning cleanup');
+    console.log('[listenCapture] Current state before cleanup:', {
+        isCapturing,
+        micMediaStream: !!micMediaStream,
+        mediaStream: !!mediaStream,
+        audioProcessor: !!audioProcessor,
+        audioContext: !!audioContext,
+        cleanupFunctions: captureCleanupFunctions.length
+    });
+    
+    // Set flag to prevent new capture starts
+    isCapturing = false;
+    
+    // Stop all media streams
+    if (micMediaStream) {
+        const tracks = micMediaStream.getTracks();
+        console.log(`[listenCapture] Stopping ${tracks.length} microphone tracks`);
+        tracks.forEach(track => {
+            track.stop();
+            console.log('[listenCapture] Stopped microphone track:', track.kind, track.id);
+        });
+        micMediaStream = null;
+    }
+    
+    if (mediaStream) {
+        const tracks = mediaStream.getTracks();
+        console.log(`[listenCapture] Stopping ${tracks.length} media tracks`);
+        tracks.forEach(track => {
+            track.stop();
+            console.log('[listenCapture] Stopped media track:', track.kind, track.id);
+        });
+        mediaStream = null;
+    }
+    
+    // Stop audio processors
+    if (audioProcessor) {
+        try {
+            audioProcessor.disconnect();
+            console.log('[listenCapture] Disconnected audio processor');
+        } catch (e) {
+            console.warn('[listenCapture] Error disconnecting audio processor:', e);
+        }
+        audioProcessor = null;
+    }
+    
+    if (audioContext) {
+        try {
+            await audioContext.close();
+            console.log('[listenCapture] Closed audio context, state:', audioContext.state);
+        } catch (e) {
+            console.warn('[listenCapture] Error closing audio context:', e);
+        }
+        audioContext = null;
+    }
+    
+    // Stop macOS audio capture if running
+    try {
+        console.log('[listenCapture] Stopping macOS audio capture...');
+        await window.api.listenCapture.stopMacosSystemAudio();
+        console.log('[listenCapture] macOS audio capture stopped');
+    } catch (error) {
+        console.warn('[listenCapture] Error stopping macOS audio capture:', error);
+    }
+    
+    // Run any additional cleanup functions
+    console.log(`[listenCapture] Running ${captureCleanupFunctions.length} cleanup functions`);
+    captureCleanupFunctions.forEach((cleanup, index) => {
+        try {
+            cleanup();
+            console.log(`[listenCapture] Cleanup function ${index} completed`);
+        } catch (e) {
+            console.warn(`[listenCapture] Error in cleanup function ${index}:`, e);
+        }
+    });
+    captureCleanupFunctions = [];
+    
+    console.log('[listenCapture] Audio capture stopped successfully');
+}
+
 async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'medium') {
+
+    // Load audio configuration from main process
+    await loadAudioConfig();
+    
+    // Prevent starting if already capturing
+    if (isCapturing) {
+        console.warn('[listenCapture] startCapture() called but already capturing - stopping previous instance first');
+        await stopCapture();
+        await new Promise(resolve => setTimeout(resolve, 100)); // Brief delay
+    }
+    
+    console.log('[listenCapture] Starting new capture instance...');
+    isCapturing = true;
+    
+    // Set up stop event listener
+    const handleStopEvent = (event, data) => {
+        console.log('[listenCapture] Received event from backend:', event, data);
+        if (data && data.status === 'stop') {
+            console.log('[listenCapture] Received stop signal from backend - calling stopCapture()');
+            stopCapture();
+        } else {
+            console.log('[listenCapture] Received non-stop event:', data);
+        }
+    };
+    
+    // Listen for stop signals from backend
+    window.api.listenCapture.onChangeListenCaptureState(handleStopEvent);
+    
+    // Add cleanup function to remove event listener
+    captureCleanupFunctions.push(() => {
+        window.api.listenCapture.removeOnChangeListenCaptureState(handleStopEvent);
+    });
 
     // Reset token tracker when starting new capture session
     tokenTracker.reset();
@@ -452,7 +589,7 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
             try {
                 micMediaStream = await navigator.mediaDevices.getUserMedia({
                     audio: {
-                        sampleRate: SAMPLE_RATE,
+                        sampleRate: SAMPLE_RATE(),
                         channelCount: 1,
                         echoCancellation: true,
                         noiseSuppression: true,
@@ -493,7 +630,7 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
             try {
                 micMediaStream = await navigator.mediaDevices.getUserMedia({
                     audio: {
-                        sampleRate: SAMPLE_RATE,
+                        sampleRate: SAMPLE_RATE(),
                         channelCount: 1,
                         echoCancellation: true,
                         noiseSuppression: true,
@@ -526,7 +663,7 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
             try {
                 micMediaStream = await navigator.mediaDevices.getUserMedia({
                     audio: {
-                        sampleRate: SAMPLE_RATE,
+                        sampleRate: SAMPLE_RATE(),
                         channelCount: 1,
                         echoCancellation: true,
                         noiseSuppression: true,
@@ -571,54 +708,20 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
     }
 }
 
-function stopCapture() {
-    // Clean up microphone resources
-    if (audioProcessor) {
-        audioProcessor.disconnect();
-        audioProcessor = null;
-    }
-    if (audioContext) {
-        audioContext.close();
-        audioContext = null;
-    }
-
-    // Clean up system audio resources
-    if (systemAudioProcessor) {
-        systemAudioProcessor.disconnect();
-        systemAudioProcessor = null;
-    }
-    if (systemAudioContext) {
-        systemAudioContext.close();
-        systemAudioContext = null;
-    }
-
-    // Stop and release media stream tracks
-    if (mediaStream) {
-        mediaStream.getTracks().forEach(track => track.stop());
-        mediaStream = null;
-    }
-    if (micMediaStream) {
-        micMediaStream.getTracks().forEach(t => t.stop());
-        micMediaStream = null;
-    }
-
-    // Stop macOS audio capture if running
-    if (isMacOS) {
-        window.api.listenCapture.stopMacosSystemAudio().catch(err => {
-            console.error('Error stopping macOS audio:', err);
-        });
-    }
-}
-
 // ---------------------------
 // Exports & global registration
 // ---------------------------
+// Export functions
 module.exports = {
     getAec,          // 새로 만든 초기화 함수
     runAecSync,      // sync 버전
     disposeAec,      // 필요시 Rust 객체 파괴
     startCapture,
     stopCapture,
+    systemAudioBuffer,
+    convertFloat32ToInt16,
+    arrayBufferToBase64,
+    // Platform info for external use
     isLinux,
     isMacOS,
 };

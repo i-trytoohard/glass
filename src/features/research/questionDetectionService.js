@@ -95,7 +95,14 @@ class QuestionDetectionService extends EventEmitter {
     async processTranscript(transcript, speaker = 'moderator') {
         if (!this.isActive) return;
 
-        console.log('[QuestionDetectionService] Processing transcript:', { 
+        // SAFETY CHECK: Only process moderator/interviewer audio for question detection
+        // Ignore participant responses to avoid false question detection
+        if (speaker !== 'moderator') {
+            console.log(`[QuestionDetectionService] Ignoring non-moderator audio from ${speaker}: "${transcript.substring(0, 30)}..."`);
+            return;
+        }
+
+        console.log('[QuestionDetectionService] Processing moderator transcript for question detection:', { 
             text: transcript.substring(0, 50) + '...', 
             speaker 
         });
@@ -113,10 +120,10 @@ class QuestionDetectionService extends EventEmitter {
             clearTimeout(this.processingTimeoutId);
         }
         
-        // Dynamic timeout based on content - longer for potential questions
+        // Dynamic timeout based on content - faster for more real-time feel
         const combinedText = this.sttBuffer.map(item => item.text).join(' ');
         const mightBeQuestion = this._containsQuestionIndicators(combinedText);
-        const timeout = mightBeQuestion ? 2500 : 1500; // Wait longer for questions
+        const timeout = mightBeQuestion ? 1200 : 800; // Faster processing for real-time feel
         
         console.log(`[QuestionDetectionService] Setting ${timeout}ms timeout (question indicators: ${mightBeQuestion})`);
         

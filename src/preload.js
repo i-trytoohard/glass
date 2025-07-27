@@ -10,6 +10,11 @@ contextBridge.exposeInMainWorld('api', {
     platform: process.platform
   },
   
+  // Audio configuration for renderer processes
+  audio: {
+    getConfig: () => ipcRenderer.invoke('audio:get-config')
+  },
+  
   // Common utilities used across multiple components
   common: {
     // User & Auth
@@ -302,14 +307,14 @@ contextBridge.exposeInMainWorld('api', {
     
     // Listeners
     onSystemAudioData: (callback) => ipcRenderer.on('system-audio-data', callback),
-    removeOnSystemAudioData: (callback) => ipcRenderer.removeListener('system-audio-data', callback)
+    removeOnSystemAudioData: (callback) => ipcRenderer.removeListener('system-audio-data', callback),
+    onChangeListenCaptureState: (callback) => ipcRenderer.on('change-listen-capture-state', callback),
+    removeOnChangeListenCaptureState: (callback) => ipcRenderer.removeListener('change-listen-capture-state', callback)
   },
 
   // src/ui/listen/audioCore/renderer.js
   renderer: {
-    // Listeners
-    onChangeListenCaptureState: (callback) => ipcRenderer.on('change-listen-capture-state', callback),
-    removeOnChangeListenCaptureState: (callback) => ipcRenderer.removeListener('change-listen-capture-state', callback)
+    // Listeners (empty for now)
   },
 
   // src/ui/research/ResearchView.js
@@ -335,9 +340,7 @@ contextBridge.exposeInMainWorld('api', {
     startResearchSession: (studyId, participantData) => ipcRenderer.invoke('research:startResearchSession', studyId, participantData),
     pauseResearchSession: () => ipcRenderer.invoke('research:pauseResearchSession'),
     resumeResearchSession: () => ipcRenderer.invoke('research:resumeResearchSession'),
-    stopResearchSession: () => ipcRenderer.invoke('research:stopResearchSession'),
-    endSession: () => ipcRenderer.invoke('research:end-session'),
-    endResearchSession: () => ipcRenderer.invoke('research:endResearchSession'),
+    endResearchSession: () => ipcRenderer.invoke('research:end-session'),
     getSessionStatus: () => ipcRenderer.invoke('research:get-session-status'),
     getSessionReport: (sessionId) => ipcRenderer.invoke('research:get-session-report', sessionId),
 

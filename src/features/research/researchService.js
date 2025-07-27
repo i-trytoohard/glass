@@ -44,7 +44,7 @@ class ResearchService extends EventEmitter {
         this.questionResponses = new Map(); // questionId -> response data
         this.transcriptBuffer = []; // Recent transcript segments for analysis
         this.lastAnalysisTime = 0;
-        this.analysisInterval = 1000; // Minimum 1 second between analyses to prevent spam
+        this.analysisInterval = 400; // Minimum 400ms between analyses for more real-time feel
         this.isLiveAnalysisActive = false;
         this.currentQuestionBeingAsked = null; // Track which question is currently being asked
         this.currentAnswerBeingGiven = ''; // Track the current answer being provided
@@ -53,14 +53,14 @@ class ResearchService extends EventEmitter {
         // Follow-up question management
         this.bestFollowUpQuestions = []; // 2 best current follow-up questions from AI
         this.displayedFollowUpQuestions = []; // Questions currently shown to user with timestamps
-        this.followUpQuestionTimeout = 10000; // 10 seconds timeout for expiring questions
+        this.followUpQuestionTimeout = 6000; // 6 seconds timeout for faster question cycling
         this.followUpQuestionMetrics = {
             totalSuggested: 0,
             totalAsked: 0,
             responses: []
         };
         this.lastFollowUpUpdateTime = 0; // Track when follow-ups were last updated
-        this.followUpUpdateInterval = 8000; // Minimum 8 seconds between follow-up updates
+        this.followUpUpdateInterval = 3000; // Minimum 3 seconds between follow-up updates for faster response
         this._listenService = null; // Lazy-loaded to avoid circular dependency
         
         // Interviewer-driven question activation
@@ -75,7 +75,7 @@ class ResearchService extends EventEmitter {
             currentTurnBuffer: '',
             currentTurnStartTime: null,
             turnCompletionTimeout: null,
-            turnCompletionDelay: 2000, // 2 seconds of silence to consider turn complete
+            turnCompletionDelay: 1200, // 1.2 seconds of silence for faster turn completion detection
             interviewerTurnHistory: [] // Keep last few complete interviewer turns
         };
         
@@ -455,15 +455,24 @@ class ResearchService extends EventEmitter {
             await listenService.handleListenRequest('Listen');
             console.log('[ResearchService] Listen service started successfully');
             
-            // Ensure listen window is visible for microphone capture
-            console.log('[ResearchService] Making listen window visible for microphone capture...');
-            internalBridge.emit('window:requestVisibility', { name: 'listen', visible: true });
+            // Ensure research window is visible for microphone capture
+            console.log('[ResearchService] Making research window visible for microphone capture...');
+            internalBridge.emit('window:requestVisibility', { name: 'research', visible: true });
+            
+            // Use proper window positioning via WindowManager instead of forcing bounds
+            try {
+                console.log('[ResearchService] Ensuring research window uses proper layout positioning');
+                // The window visibility request will handle proper positioning via WindowLayoutManager
+                // No need to force specific bounds - let the layout system handle it
+            } catch (error) {
+                console.error('[ResearchService] Error with window positioning:', error);
+            }
             
             // Wait a moment for window to be ready, then start microphone capture
             setTimeout(() => {
                 console.log('[ResearchService] Triggering microphone capture start...');
                 listenService.sendToRenderer('change-listen-capture-state', { status: "start" });
-            }, 1000);
+            }, 300); // Faster startup for more responsive feel
             
             // Also start audio capture
             console.log('[ResearchService] Starting macOS audio capture...');
@@ -560,61 +569,7 @@ class ResearchService extends EventEmitter {
         };
     }
 
-    /**
-     * Stop the current research session
-     * @returns {boolean} Success status
-     */
-    async stopResearchSession() {
-        if (!this.currentSession) {
-            console.log('[ResearchService] No active session to stop');
-            return false;
-        }
 
-        console.log('[ResearchService] Stopping research session:', this.currentSession);
-
-        try {
-            // Stop question detection
-            this.questionDetectionService.stopDetection();
-
-            // NEW: Clean up speech completion detection state
-            this._resetTurnState();
-            this.speakerTurnManager.interviewerTurnHistory = [];
-
-            // End session in database
-            const sessionRepo = require('../common/repositories/session'); // Assuming getSessionRepository is in session.js
-            await sessionRepo.endSession(this.currentSession.session_id, {
-                questions_completed: Array.from(this.questionStatus.entries())
-                    .filter(([_, status]) => status === 'completed').length,
-                total_questions: this.activeQuestions.size,
-                completion_percentage: this.getCompletionPercentage()
-            });
-
-            console.log('[ResearchService] Research session stopped successfully');
-
-            const stoppedSessionId = this.currentSession.session_id;
-            const stoppedStudyId = this.currentStudy?.id;
-
-            // Reset state
-            this.currentSession = null;
-            this.currentStudy = null;
-            this.activeQuestions.clear();
-            this.questionStatus.clear();
-            this.responses.clear();
-            this.insights.clear();
-
-            // Emit session ended
-            this.emit('session-ended', {
-                sessionId: stoppedSessionId,
-                studyId: stoppedStudyId
-            });
-
-            return true;
-
-        } catch (error) {
-            console.error('[ResearchService] Error stopping research session:', error);
-            throw error;
-        }
-    }
 
     /**
      * Get completion percentage for the current session
@@ -648,9 +603,9 @@ class ResearchService extends EventEmitter {
             await listenService.stopMacOSAudioCapture();
             await listenService.handleListenRequest('Stop');
             
-            // Hide listen window
-            console.log('[ResearchService] Hiding listen window...');
-            internalBridge.emit('window:requestVisibility', { name: 'listen', visible: false });
+            // Hide research window
+            console.log('[ResearchService] Hiding research window...');
+            internalBridge.emit('window:requestVisibility', { name: 'research', visible: false });
             
             console.log('[ResearchService] Audio capture and listen service stopped successfully');
         } catch (error) {
@@ -784,11 +739,11 @@ class ResearchService extends EventEmitter {
     
     async processTranscriptSegment(speaker, text, timestamp) {
         if (!this.isLiveAnalysisActive || !this.currentStudy) {
-            console.log('[ResearchService] Skipping transcript - analysis not active or no study');
+            console.log('[ResearchService] 🔍 DEBUG: Skipping transcript - analysis not active or no study');
             return;
         }
         
-        console.log(`[ResearchService] Processing transcript: ${speaker} - ${text.substring(0, 50)}...`);
+        console.log(`[ResearchService] Processing transcript: ${speaker} - "${text.substring(0, 50)}..."`);
         
         // NEW: Implement speech completion detection
         await this._handleSpeechTurn(speaker, text, timestamp);
@@ -811,6 +766,8 @@ class ResearchService extends EventEmitter {
         if (this.transcriptBuffer.length > 50) {
             this.transcriptBuffer.shift();
         }
+        
+
     }
 
     /**
@@ -1061,6 +1018,7 @@ class ResearchService extends EventEmitter {
             unprocessedSegments.forEach(seg => seg.processed = true);
             
             // Update follow-up questions with intelligent management
+            console.log(`[ResearchService] AI returned ${analysis.suggestions?.length || 0} suggestions`);
             this.updateFollowUpQuestions(analysis.suggestions || []);
             
             // Emit updates
@@ -1417,10 +1375,20 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
     shouldSuggestFollowUps() {
         console.log(`[ResearchService] 🔍 DEBUG: Checking if should suggest follow-ups...`);
         
-        // Don't suggest follow-ups if we have no active question context
+        // Allow follow-ups during any conversation, not just when a specific question is active
+        // This enables follow-ups during free-form conversation
         if (!this.currentQuestionBeingAsked) {
-            console.log(`[ResearchService] 🔍 DEBUG: No active question - currentQuestionBeingAsked is ${this.currentQuestionBeingAsked}`);
-            return false;
+            console.log(`[ResearchService] 🔍 DEBUG: No active question, but allowing follow-ups during free conversation`);
+            
+            // Check if there's any recent conversation to base follow-ups on
+            if (this.transcriptBuffer.length === 0) {
+                console.log(`[ResearchService] 🔍 DEBUG: No conversation yet - no follow-ups needed`);
+                return false;
+            }
+            
+            // Allow follow-ups if there's been conversation
+            console.log(`[ResearchService] 🔍 DEBUG: Recent conversation detected - follow-ups allowed`);
+            return true;
         }
         
         console.log(`[ResearchService] 🔍 DEBUG: Active question: ${this.currentQuestionBeingAsked?.substring(0, 8)}...`);
@@ -1459,8 +1427,9 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
             const mostRecentFollowUp = Math.max(...this.displayedFollowUpQuestions.map(q => q.displayedAt));
             const timeSinceLastFollowUp = Date.now() - mostRecentFollowUp;
             
-            if (timeSinceLastFollowUp < 15000) { // Less than 15 seconds
-                console.log(`[ResearchService] 🔍 DEBUG: Already showing recent follow-ups, waiting ${15000 - timeSinceLastFollowUp}ms`);
+            // Use configured interval instead of hardcoded 15 seconds - much more responsive!
+            if (timeSinceLastFollowUp < this.followUpUpdateInterval) {
+                console.log(`[ResearchService] 🔍 DEBUG: Already showing recent follow-ups, waiting ${this.followUpUpdateInterval - timeSinceLastFollowUp}ms`);
                 return false;
             }
         }
@@ -1744,9 +1713,9 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
         const now = Date.now();
         const timeSinceLastUpdate = now - this.lastFollowUpUpdateTime;
         
-        console.log(`[ResearchService] 🔍 DEBUG: updateFollowUpQuestions called with ${newSuggestions?.length || 0} suggestions`);
+        console.log(`[ResearchService] updateFollowUpQuestions called with ${newSuggestions?.length || 0} suggestions`);
         if (newSuggestions && newSuggestions.length > 0) {
-            console.log(`[ResearchService] 🔍 DEBUG: Raw suggestions from AI:`, newSuggestions);
+
         }
         
         // Quality filter: Only keep follow-ups that are actually needed
@@ -1756,8 +1725,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
         this.bestFollowUpQuestions = filteredSuggestions.slice(0, 2);
         this.followUpQuestionMetrics.totalSuggested += newSuggestions.length;
         
-        console.log(`[ResearchService] 🔍 DEBUG: Received ${newSuggestions.length} raw suggestions, filtered to ${filteredSuggestions.length} high-quality ones`);
-        console.log(`[ResearchService] 🔍 DEBUG: Time since last follow-up update: ${timeSinceLastUpdate}ms`);
+        console.log(`[ResearchService] Received ${newSuggestions.length} raw suggestions, filtered to ${filteredSuggestions.length} high-quality ones`);
         
         // Always expire old questions first
         this.expireOldFollowUpQuestions(now);

@@ -15,6 +15,7 @@ const permissionService = require('../features/common/services/permissionService
 const encryptionService = require('../features/common/services/encryptionService');
 const researchService = require('../features/research/researchService');
 const windowManager = require('../window/windowManager');
+const config = require('../features/common/config/config');
 
 module.exports = {
   // Renderer로부터의 요청을 수신하고 서비스로 전달
@@ -77,6 +78,9 @@ module.exports = {
     // General
     ipcMain.handle('get-preset-templates', () => presetRepository.getPresetTemplates());
     ipcMain.handle('get-web-url', () => process.env.pickleglass_WEB_URL || 'http://localhost:3000');
+
+    // Audio Configuration
+    ipcMain.handle('audio:get-config', () => config.getAudioConfig());
 
     // Ollama
     ipcMain.handle('ollama:get-status', async () => await ollamaService.handleGetStatus());
@@ -147,7 +151,25 @@ module.exports = {
     ipcMain.handle('research:delete-question', async (event, questionId) => await researchService.deleteQuestion(questionId));
     
     ipcMain.handle('research:start-session', async (event, { studyId, participantData }) => await researchService.startResearchSession(studyId, participantData));
-    ipcMain.handle('research:end-session', async () => await researchService.endResearchSession());
+    ipcMain.handle('research:end-session', async () => {
+      try {
+        console.log('[FeatureBridge] Ending research session');
+        await researchService.endResearchSession();
+        
+        // Emit status change event
+        BrowserWindow.getAllWindows().forEach(window => {
+          window.webContents.send('research:interview-status-changed', { 
+            success: true, 
+            status: 'ended' 
+          });
+        });
+        
+        return { success: true };
+      } catch (error) {
+        console.error('[FeatureBridge] research:end-session failed', error.message);
+        return { success: false, error: error.message };
+      }
+    });
     ipcMain.handle('research:get-session-status', async () => researchService.getSessionStatus());
     ipcMain.handle('research:get-session-report', async (event, sessionId) => await researchService.getSessionReport(sessionId));
     
@@ -213,8 +235,17 @@ module.exports = {
 
     // Research navigation handler
     ipcMain.handle('research:navigate-to-research', async () => {
-        // Request navigation with toggle logic handled by window manager
-        internalBridge.emit('window:requestNavigation', { view: 'toggle-research' });
+        console.log('[FeatureBridge] research:navigate-to-research called');
+        try {
+            // Request navigation with toggle logic handled by window manager
+            console.log('[FeatureBridge] Emitting window:requestNavigation with toggle-research');
+            internalBridge.emit('window:requestNavigation', { view: 'toggle-research' });
+            console.log('[FeatureBridge] Navigation request emitted successfully');
+            return { success: true };
+        } catch (error) {
+            console.error('[FeatureBridge] Navigation request failed:', error);
+            return { success: false, error: error.message };
+        }
     });
 
     // Study dropdown handlers
@@ -596,26 +627,6 @@ module.exports = {
       }
     });
 
-    ipcMain.handle('research:endResearchSession', async () => {
-      try {
-        console.log('[FeatureBridge] Ending research session');
-        await researchService.endResearchSession();
-        
-        // Emit status change event
-        BrowserWindow.getAllWindows().forEach(window => {
-          window.webContents.send('research:interview-status-changed', { 
-            success: true, 
-            status: 'ended' 
-          });
-        });
-        
-        return { success: true };
-      } catch (error) {
-        console.error('[FeatureBridge] research:endResearchSession failed', error.message);
-        return { success: false, error: error.message };
-      }
-    });
-
     // Question detection IPC handlers
     ipcMain.handle('research:processTranscript', async (event, transcript, speaker) => {
         try {
@@ -633,17 +644,6 @@ module.exports = {
             return { success: true };
         } catch (error) {
             console.error('[FeatureBridge] Error in manual question override:', error);
-            return { success: false, error: error.message };
-        }
-    });
-
-    // Stop research session
-    ipcMain.handle('research:stopResearchSession', async (event) => {
-        try {
-            const result = await researchService.stopResearchSession();
-            return { success: true, stopped: result };
-        } catch (error) {
-            console.error('[FeatureBridge] Error stopping research session:', error);
             return { success: false, error: error.message };
         }
     });

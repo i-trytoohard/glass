@@ -110,32 +110,50 @@ function setupWindowController(windowPool, layoutManager, movementManager) {
     });
     internalBridge.on('window:requestNavigation', ({ view }) => {
         console.log('[WindowManager] Navigation request received:', view);
-        const listenWin = windowPool.get('listen');
-        if (listenWin && !listenWin.isDestroyed()) {
-            const currentUrl = listenWin.webContents.getURL();
-            console.log('[WindowManager] Current URL:', currentUrl);
-            const url = new URL(currentUrl);
-            
-            let targetView = view;
-            
-            // Handle toggle logic for research view
-            if (view === 'toggle-research') {
-                const currentView = url.searchParams.get('view') || 'listen';
-                console.log('[WindowManager] Current view:', currentView, '-> Target view:', currentView === 'research' ? 'listen' : 'research');
-                targetView = currentView === 'research' ? 'listen' : 'research';
-            }
-            
-            url.searchParams.set('view', targetView);
-            const newUrl = url.toString();
-            console.log('[WindowManager] Loading new URL:', newUrl);
-            listenWin.loadURL(newUrl);
-            
-            // Make sure the window is visible
-            if (!listenWin.isVisible()) {
-                listenWin.show();
+        const researchWin = windowPool.get('research');
+        console.log('[WindowManager] Research window available:', !!researchWin);
+        console.log('[WindowManager] Research window destroyed:', researchWin ? researchWin.isDestroyed() : 'N/A');
+        
+        if (researchWin && !researchWin.isDestroyed()) {
+            try {
+                console.log('[WindowManager] Research window destroyed:', researchWin.isDestroyed());
+                
+                const currentUrl = researchWin.webContents.getURL();
+                console.log('[WindowManager] Current URL:', currentUrl);
+                
+                const url = new URL(currentUrl);
+                console.log('[WindowManager] URL parsed successfully');
+                
+                let targetView = view;
+                
+                // Handle navigation - both research and listen requests use research window
+                if (view === 'toggle-research' || view === 'toggle-listen') {
+                    targetView = 'research';  // Always go to research view
+                    console.log('[WindowManager] Navigation requested - setting target view to research');
+                }
+                
+                console.log('[WindowManager] Final target view:', targetView);
+                url.searchParams.set('view', targetView);
+                const newUrl = url.toString();
+                console.log('[WindowManager] Loading new URL:', newUrl);
+                
+                researchWin.loadURL(newUrl);
+                console.log('[WindowManager] URL load initiated');
+                
+                // Make sure the window is visible
+                if (!researchWin.isVisible()) {
+                    console.log('[WindowManager] Making research window visible');
+                    researchWin.show();
+                } else {
+                    console.log('[WindowManager] Research window already visible');
+                }
+            } catch (urlError) {
+                console.error('[WindowManager] Error during navigation:', urlError);
+                console.error('[WindowManager] Error stack:', urlError.stack);
+                console.error('[WindowManager] Current URL that failed:', researchWin.webContents.getURL());
             }
         } else {
-            console.log('[WindowManager] Listen window not found or destroyed');
+            console.log('[WindowManager] Research window not found or destroyed');
         }
     });
     internalBridge.on('window:moveToDisplay', ({ displayId }) => {
@@ -308,7 +326,21 @@ async function handleWindowVisibilityRequest(windowPool, layoutManager, movement
 
     if (name !== 'settings') {
         const isCurrentlyVisible = win.isVisible();
-        if (isCurrentlyVisible === shouldBeVisible) {
+        // For research window, handle both show and hide explicitly
+        if (name === 'research') {
+            if (shouldBeVisible) {
+                console.log(`[WindowManager] Forcing research window to show and focus (was visible: ${isCurrentlyVisible})`);
+                win.show();
+                win.focus();
+                win.moveTop();
+            } else {
+                console.log(`[WindowManager] Hiding research window (was visible: ${isCurrentlyVisible})`);
+                win.hide();
+            }
+            return;
+        }
+        // For other windows, check if already in desired state
+        else if (isCurrentlyVisible === shouldBeVisible) {
             console.log(`[WindowManager] Window '${name}' is already in the desired state.`);
             return;
         }
@@ -408,9 +440,9 @@ async function handleWindowVisibilityRequest(windowPool, layoutManager, movement
         return;
     }
 
-    if (name === 'listen' || name === 'ask') {
+    if (name === 'research' || name === 'ask') {
         const win = windowPool.get(name);
-        const otherName = name === 'listen' ? 'ask' : 'listen';
+        const otherName = name === 'research' ? 'ask' : 'research';
         const otherWin = windowPool.get(otherName);
         const isOtherWinVisible = otherWin && !otherWin.isDestroyed() && otherWin.isVisible();
         
@@ -418,7 +450,7 @@ async function handleWindowVisibilityRequest(windowPool, layoutManager, movement
         const ANIM_OFFSET_Y = 20;
 
         const finalVisibility = {
-            listen: (name === 'listen' && shouldBeVisible) || (otherName === 'listen' && isOtherWinVisible),
+            research: (name === 'research' && shouldBeVisible) || (otherName === 'research' && isOtherWinVisible),
             ask: (name === 'ask' && shouldBeVisible) || (otherName === 'ask' && isOtherWinVisible),
         };
         if (!shouldBeVisible) {
@@ -433,7 +465,7 @@ async function handleWindowVisibilityRequest(windowPool, layoutManager, movement
             if (!targetBounds) return;
 
             const startPos = { ...targetBounds };
-            if (name === 'listen') startPos.x -= ANIM_OFFSET_X;
+            if (name === 'research') startPos.x -= ANIM_OFFSET_X;
             else if (name === 'ask') startPos.y -= ANIM_OFFSET_Y;
 
             win.setOpacity(0);
@@ -448,7 +480,7 @@ async function handleWindowVisibilityRequest(windowPool, layoutManager, movement
 
             const currentBounds = win.getBounds();
             const targetPos = { ...currentBounds };
-            if (name === 'listen') targetPos.x -= ANIM_OFFSET_X;
+            if (name === 'research') targetPos.x -= ANIM_OFFSET_X;
             else if (name === 'ask') targetPos.y -= ANIM_OFFSET_Y;
 
             movementManager.fade(win, { to: 0, onComplete: () => win.hide() });
@@ -519,24 +551,24 @@ function createFeatureWindows(header, namesToCreate) {
         console.log(`[WindowManager] Creating window: ${name}`);
         
         switch (name) {
-            case 'listen': {
-                const listen = new BrowserWindow({
+            case 'research': {
+                const research = new BrowserWindow({
                     ...commonChildOptions, width:800, height:600, minWidth:400, minHeight:400, maxWidth:1200, maxHeight:1200, resizable: true,
                 });
-                listen.setContentProtection(isContentProtectionOn);
-                listen.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
+                research.setContentProtection(isContentProtectionOn);
+                research.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
                 if (process.platform === 'darwin') {
-                    listen.setWindowButtonVisibility(false);
+                    research.setWindowButtonVisibility(false);
                 }
-                const listenLoadOptions = { query: { view: 'listen' } };
+                const researchLoadOptions = { query: { view: 'research' } };
                 if (!shouldUseLiquidGlass) {
-                    listen.loadFile(path.join(__dirname, '../ui/app/content.html'), listenLoadOptions);
+                    research.loadFile(path.join(__dirname, '../ui/app/content.html'), researchLoadOptions);
                 }
                 else {
-                    listenLoadOptions.query.glass = 'true';
-                    listen.loadFile(path.join(__dirname, '../ui/app/content.html'), listenLoadOptions);
-                    listen.webContents.once('did-finish-load', () => {
-                        const viewId = liquidGlass.addView(listen.getNativeWindowHandle());
+                    researchLoadOptions.query.glass = 'true';
+                    research.loadFile(path.join(__dirname, '../ui/app/content.html'), researchLoadOptions);
+                    research.webContents.once('did-finish-load', () => {
+                        const viewId = liquidGlass.addView(research.getNativeWindowHandle());
                         if (viewId !== -1) {
                             liquidGlass.unstable_setVariant(viewId, liquidGlass.GlassMaterialVariant.bubbles);
                             // liquidGlass.unstable_setScrim(viewId, 1);
@@ -545,9 +577,9 @@ function createFeatureWindows(header, namesToCreate) {
                     });
                 }
                 if (!app.isPackaged) {
-                    listen.webContents.openDevTools({ mode: 'detach' });
+                    research.webContents.openDevTools({ mode: 'detach' });
                 }
-                windowPool.set('listen', listen);
+                windowPool.set('research', research);
                 break;
             }
 
@@ -702,7 +734,7 @@ function createFeatureWindows(header, namesToCreate) {
     } else if (typeof namesToCreate === 'string') {
         createFeatureWindow(namesToCreate);
     } else {
-        createFeatureWindow('listen');
+        createFeatureWindow('research');
         createFeatureWindow('ask');
         createFeatureWindow('settings');
         createFeatureWindow('shortcut-settings');
@@ -817,7 +849,7 @@ function createWindows() {
     setupWindowController(windowPool, layoutManager, movementManager);
 
     if (currentHeaderState === 'main') {
-        createFeatureWindows(header, ['listen', 'ask', 'settings', 'shortcut-settings', 'study-dropdown']);
+        createFeatureWindows(header, ['research', 'ask', 'settings', 'shortcut-settings', 'study-dropdown']);
     }
 
     header.setContentProtection(isContentProtectionOn);

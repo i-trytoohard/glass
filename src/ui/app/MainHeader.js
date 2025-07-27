@@ -632,12 +632,12 @@ export class MainHeader extends LitElement {
 
     async _handleStartInterview() {
         if (!this.selectedStudy || this.isTogglingSession) return;
-        
         console.log('[MainHeader] Starting interview with study:', {
             studyId: this.selectedStudy.id,
             studyTitle: this.selectedStudy.title,
             hasQuestions: !!this.selectedStudy.questions,
-            questionCount: this.selectedStudy.questions?.length || 0
+            questionCount: this.selectedStudy.questions?.length || 0,
+            interviewStatus: this.interviewStatus
         });
         
         this.isTogglingSession = true;
@@ -653,11 +653,24 @@ export class MainHeader extends LitElement {
             
             // Navigate to research view first so it's ready to receive events
             console.log('[MainHeader] Navigating to research view first');
-            await window.api.mainHeader.sendResearchButtonClick();
-            console.log('[MainHeader] Navigation to research view completed');
+            console.log('[MainHeader] window.api available:', !!window.api);
+            console.log('[MainHeader] window.api.mainHeader available:', !!window.api?.mainHeader);
+            console.log('[MainHeader] sendResearchButtonClick available:', !!window.api?.mainHeader?.sendResearchButtonClick);
             
-            // Give the research view a moment to load and set up event listeners
-            await new Promise(resolve => setTimeout(resolve, 200));
+            try {
+                console.log('[MainHeader] About to call sendResearchButtonClick...');
+                const navResult = await window.api.mainHeader.sendResearchButtonClick();
+                console.log('[MainHeader] Navigation result:', navResult);
+                console.log('[MainHeader] Navigation to research view completed');
+                
+                // Give extra time for window navigation on restart
+                console.log('[MainHeader] Waiting for window to navigate...');
+                await new Promise(resolve => setTimeout(resolve, 1000)); // Increased to 1 second
+                
+            } catch (navError) {
+                console.error('[MainHeader] Navigation failed:', navError);
+                // Note: Navigation failure should be rare with the consolidated research window
+            }
             
             // Now start the research session (ResearchView is ready to receive events)
             console.log('[MainHeader] Calling research.startResearchSession with studyId:', this.selectedStudy.id);
@@ -669,6 +682,7 @@ export class MainHeader extends LitElement {
             
         } catch (error) {
             console.error('[MainHeader] Failed to start interview:', error);
+            console.error('[MainHeader] Error stack:', error.stack);
         } finally {
             this.isTogglingSession = false;
             this.requestUpdate();
@@ -695,7 +709,7 @@ export class MainHeader extends LitElement {
         
         this.isTogglingSession = true;
         try {
-            await window.api.research.stopResearchSession();
+            await window.api.research.endResearchSession();
             this.interviewStatus = 'idle';
             this.stopTimer();
             

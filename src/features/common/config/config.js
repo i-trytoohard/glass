@@ -29,7 +29,21 @@ class Config {
             enableSQLiteStorage: true,
             
             logLevel: 'info',
-            enableDebugLogging: false
+            enableDebugLogging: false,
+            
+            // Audio Processing Configuration
+            audio: {
+                sampleRate: 24000,
+                chunkDuration: 0.1,        // seconds (100ms)
+                bufferSize: 2048,          // samples
+                enableLogging: true,       // can be overridden by GLASS_AUDIO_LOGGING env var
+                format: 'pcm16',
+                channels: 1,
+                
+                // Timing controls
+                minChunkInterval: 90,      // minimum ms between chunks
+                maxChunkInterval: 110      // maximum ms between chunks (for validation)
+            }
         };
         
         this.config = { ...this.defaults };
@@ -68,6 +82,26 @@ class Config {
             this.config.enableDebugLogging = process.env.pickleglass_DEBUG === 'true';
         }
         
+        // Audio configuration from environment
+        if (process.env.GLASS_AUDIO_CHUNK_DURATION) {
+            this.config.audio.chunkDuration = parseFloat(process.env.GLASS_AUDIO_CHUNK_DURATION);
+            console.log(`[Config] Audio chunk duration from env: ${this.config.audio.chunkDuration}s`);
+        }
+        
+        if (process.env.GLASS_AUDIO_SAMPLE_RATE) {
+            this.config.audio.sampleRate = parseInt(process.env.GLASS_AUDIO_SAMPLE_RATE);
+            console.log(`[Config] Audio sample rate from env: ${this.config.audio.sampleRate}Hz`);
+        }
+        
+        if (process.env.GLASS_AUDIO_BUFFER_SIZE) {
+            this.config.audio.bufferSize = parseInt(process.env.GLASS_AUDIO_BUFFER_SIZE);
+            console.log(`[Config] Audio buffer size from env: ${this.config.audio.bufferSize}`);
+        }
+        
+        if (process.env.GLASS_AUDIO_LOGGING !== undefined) {
+            this.config.audio.enableLogging = process.env.GLASS_AUDIO_LOGGING !== 'false';
+        }
+
         if (this.env === 'production') {
             this.config.enableDebugLogging = false;
             this.config.logLevel = 'warn';
@@ -146,6 +180,23 @@ class Config {
         const currentLevelIndex = levels.indexOf(this.config.logLevel);
         const requestedLevelIndex = levels.indexOf(level);
         return requestedLevelIndex >= currentLevelIndex;
+    }
+    
+    // Audio configuration convenience methods
+    getAudioConfig() {
+        return { ...this.config.audio };
+    }
+    
+    getAudioChunkDurationMs() {
+        return this.config.audio.chunkDuration * 1000;
+    }
+    
+    getAudioSamplesPerChunk() {
+        return this.config.audio.sampleRate * this.config.audio.chunkDuration;
+    }
+    
+    isAudioLoggingEnabled() {
+        return this.config.audio.enableLogging;
     }
 }
 

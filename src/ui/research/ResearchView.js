@@ -557,44 +557,14 @@ export class ResearchView extends LitElement {
             text-align: right;
         }
 
-        .no-current-question, .no-next-question {
+        .no-current-question {
             color: #718096;
             font-style: italic;
             text-align: center;
             padding: 20px;
         }
 
-        /* Next Question */
-        .next-question {
-            background: rgba(40, 40, 40, 0.7);
-            border-color: rgba(255, 255, 255, 0.08);
-        }
-
-        .next-question-display {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-
-        .next-question-text {
-            font-size: 15px;
-            font-weight: 500;
-            color: white;
-        }
-
-        .next-question-reason {
-            font-size: 12px;
-            color: #e0e0e0;
-            background: rgba(30, 30, 30, 0.8);
-            padding: 6px 10px;
-            border-radius: 4px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            align-self: flex-start;
-        }
-
-
-
-        /* Question Items */
+        /* Pending Questions */
         .question-item {
             display: flex;
             align-items: flex-start;
@@ -674,7 +644,6 @@ export class ResearchView extends LitElement {
         sessionStatus: { type: Object, state: true },
         questions: { type: Array, state: true },
         currentQuestion: { type: Object, state: true },
-        nextQuestion: { type: Object, state: true },
         showPendingQuestions: { type: Boolean, state: true },
         showAskedQuestions: { type: Boolean, state: true },
         
@@ -698,7 +667,6 @@ export class ResearchView extends LitElement {
         };
         this.questions = [];
         this.currentQuestion = null;
-        this.nextQuestion = null;
         this.showPendingQuestions = true;
         this.showAskedQuestions = false;
         
@@ -707,6 +675,13 @@ export class ResearchView extends LitElement {
         this.questionDetectionActive = false;
         this.detectionConfidence = 0;
         this.lastDetectionUpdate = null;
+        
+        // Initialize suggestions array to prevent undefined errors
+        this.suggestions = [];
+        this.followUpMetrics = {
+            totalAsked: 0,
+            totalSuggested: 0
+        };
         
         console.log('[ResearchView] Constructor - Component initialized');
     }
@@ -945,7 +920,8 @@ export class ResearchView extends LitElement {
     async endResearchSession() {
         try {
             await window.api.research.endSession();
-            this.mode = 'analysis';
+            // Don't switch to analysis mode - let the window hide instead
+            // this.mode = 'analysis';
         } catch (error) {
             console.error('Failed to end research session:', error);
         }
@@ -1023,16 +999,16 @@ export class ResearchView extends LitElement {
 
     _handleSessionEnded(event, data) {
         console.log('[ResearchView] Research session ended:', data);
-        this.mode = 'analysis';
+        // Don't switch to analysis mode - let the window hide instead
+        // this.mode = 'analysis';
         this.requestUpdate();
     }
 
     _handleAnalysisUpdate(event, data) {
-        console.log('Research analysis update:', data);
+        console.log('Research analysis update received:', data.suggestions?.length || 0, 'suggestions');
         this.sessionStatus = data.status;
         this.suggestions = data.suggestions || [];
         this.currentQuestion = data.currentQuestion || null;
-        this.nextQuestion = data.nextQuestion || null;
         this.followUpMetrics = data.followUpMetrics || this.followUpMetrics;
         this.requestUpdate(); // Force re-render to show updated data
     }
@@ -1236,14 +1212,24 @@ export class ResearchView extends LitElement {
         }
 
         const allQuestions = Object.entries(this.sessionStatus.questionBreakdown || {});
-        const pendingQuestions = allQuestions.filter(([id, q]) => q.status === 'not_asked');
+        const pendingQuestions = allQuestions.filter(([id, q]) => {
+            // Exclude questions that are not_asked AND not the current question
+            if (q.status !== 'not_asked') return false;
+            
+            // If we have a current question, exclude it from pending
+            if (this.currentQuestion && this.currentQuestion.questionText) {
+                return q.text !== this.currentQuestion.questionText;
+            }
+            
+            return true;
+        });
         const askedQuestions = allQuestions.filter(([id, q]) => q.status !== 'not_asked');
 
-        console.log('[ResearchView] Rendering Live Dashboard content:', {
+        console.log('[ResearchView] Rendering Live Dashboard:', {
             pendingQuestionsCount: pendingQuestions.length,
             askedQuestionsCount: askedQuestions.length,
             currentQuestion: !!this.currentQuestion,
-            nextQuestion: !!this.nextQuestion
+            suggestionsCount: this.suggestions.length
         });
 
         return html`

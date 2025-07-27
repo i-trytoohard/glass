@@ -4,6 +4,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const { createSTT } = require('../../common/ai/factory');
 const modelStateService = require('../../common/services/modelStateService');
+const config = require('../../common/config/config');
 
 const COMPLETION_DEBOUNCE_MS = 2000;
 
@@ -49,10 +50,12 @@ class SttService {
         this.modelInfo = null; 
         
         // Audio logging configuration
-        this.audioLoggingEnabled = process.env.GLASS_AUDIO_LOGGING !== 'false'; // Enable by default
+        this.audioLoggingEnabled = config.isAudioLoggingEnabled();
         this.audioLogDir = null;
         this.sessionStartTime = null;
         this.audioChunkCounter = 0;
+        
+        console.log(`[SttService] Audio logging ${this.audioLoggingEnabled ? 'enabled' : 'disabled'} (STT service level)`);
         
         // Initialize audio logging
         this.initializeAudioLogging();
@@ -86,12 +89,13 @@ class SttService {
             console.log(`[SttService] Audio logging initialized: ${this.audioLogDir}`);
             
             // Create session metadata file
+            const audioConfig = config.getAudioConfig();
             const metadata = {
                 sessionStart: this.sessionStartTime.toISOString(),
-                sampleRate: 24000,
-                format: 'pcm16',
-                channels: 1,
-                chunkDuration: '100ms'
+                sampleRate: audioConfig.sampleRate,
+                format: audioConfig.format,
+                channels: audioConfig.channels,
+                chunkDuration: `${audioConfig.chunkDuration * 1000}ms`
             };
             
             await fs.writeFile(
@@ -270,12 +274,18 @@ Generated: ${new Date().toISOString()}
             // Import research service directly like featureBridge does
             const researchService = require('../../research/researchService');
             
-            // Determine speaker - for now assume "Them" is moderator
-            const speaker = transcriptData.speaker === 'Them' ? 'moderator' : 'participant';
+            // FIXED: Correct speaker mapping for question detection
+            // "Me" = microphone = interviewer/moderator (should detect questions)
+            // "Them" = system audio = participant (should NOT detect questions)
+            const speaker = transcriptData.speaker === 'Me' ? 'moderator' : 'participant';
             
-            // Only forward if it's a final transcription (not partial)
-            if (!transcriptData.isPartial && transcriptData.isFinal) {
+            // CRITICAL: Only forward microphone audio ("Me") to question detection
+            // System audio ("Them") contains participant responses and should be ignored
+            if (transcriptData.speaker === 'Me' && !transcriptData.isPartial && transcriptData.isFinal) {
+                console.log(`[SttService] Forwarding microphone audio for question detection: "${transcriptData.text.substring(0, 50)}..."`);
                 researchService.processTranscript(transcriptData.text, speaker);
+            } else if (transcriptData.speaker === 'Them') {
+                console.log(`[SttService] Ignoring system audio for question detection: "${transcriptData.text.substring(0, 30)}..."`);
             }
         } catch (error) {
             // Silently handle error to avoid breaking STT service
@@ -769,11 +779,10 @@ Generated: ${new Date().toISOString()}
         // const isGemini = provider === 'gemini';
         
         if (!this.mySttSession) {
-            throw new Error('User STT session not active');
+            // Gracefully handle audio after session ends (common during cleanup)
+            console.warn('[SttService] Ignoring mic audio - STT session not active (session likely ended)');
+            return;
         }
-
-        // Log audio chunk before processing
-        await this.saveAudioChunk(data, 'mic', mimeType);
 
         let modelInfo = this.modelInfo;
         if (!modelInfo) {
@@ -792,16 +801,19 @@ Generated: ${new Date().toISOString()}
         } else {
             payload = data;
         }
+        
+        // Log audio chunk RIGHT BEFORE sending to STT provider
+        await this.saveAudioChunk(data, 'mic', mimeType);
+        
         await this.mySttSession.sendRealtimeInput(payload);
     }
 
     async sendSystemAudioContent(data, mimeType) {
         if (!this.theirSttSession) {
-            throw new Error('Their STT session not active');
+            // Gracefully handle audio after session ends (common during cleanup)
+            console.warn('[SttService] Ignoring system audio - STT session not active (session likely ended)');
+            return;
         }
-
-        // Log audio chunk before processing  
-        await this.saveAudioChunk(data, 'system', mimeType);
 
         let modelInfo = this.modelInfo;
         if (!modelInfo) {
@@ -820,6 +832,9 @@ Generated: ${new Date().toISOString()}
         } else {
             payload = data;
         }
+
+        // Log audio chunk RIGHT BEFORE sending to STT provider
+        await this.saveAudioChunk(data, 'system', mimeType);
 
         await this.theirSttSession.sendRealtimeInput(payload);
     }
@@ -878,8 +893,9 @@ Generated: ${new Date().toISOString()}
 
         console.log('SystemAudioDump started with PID:', this.systemAudioProc.pid);
 
-        const CHUNK_DURATION = 0.1;
-        const SAMPLE_RATE = 24000;
+        const audioConfig = config.getAudioConfig();
+        const CHUNK_DURATION = audioConfig.chunkDuration;
+        const SAMPLE_RATE = audioConfig.sampleRate;
         const BYTES_PER_SAMPLE = 2;
         const CHANNELS = 2;
         const CHUNK_SIZE = SAMPLE_RATE * BYTES_PER_SAMPLE * CHANNELS * CHUNK_DURATION;

@@ -42,10 +42,10 @@ class ListenService {
 
     sendToRenderer(channel, data) {
         const { windowPool } = require('../../window/windowManager');
-        const listenWindow = windowPool?.get('listen');
+        const researchWindow = windowPool?.get('research');
         
-        if (listenWindow && !listenWindow.isDestroyed()) {
-            listenWindow.webContents.send(channel, data);
+        if (researchWindow && !researchWindow.isDestroyed()) {
+            researchWindow.webContents.send(channel, data);
         }
     }
 
@@ -56,32 +56,34 @@ class ListenService {
 
     async handleListenRequest(listenButtonText) {
         const { windowPool } = require('../../window/windowManager');
-        const listenWindow = windowPool.get('listen');
+        const researchWindow = windowPool.get('research');
         const header = windowPool.get('header');
 
         try {
             switch (listenButtonText) {
                 case 'Listen':
                     console.log('[ListenService] changeSession to "Listen"');
-                    internalBridge.emit('window:requestVisibility', { name: 'listen', visible: true });
+                    // Window visibility is handled by the calling service (ResearchService)
                     await this.initializeSession();
-                    if (listenWindow && !listenWindow.isDestroyed()) {
-                        listenWindow.webContents.send('session-state-changed', { isActive: true });
+                    if (researchWindow && !researchWindow.isDestroyed()) {
+                        researchWindow.webContents.send('session-state-changed', { isActive: true });
                     }
                     break;
         
                 case 'Stop':
                     console.log('[ListenService] changeSession to "Stop"');
                     await this.closeSession();
-                    if (listenWindow && !listenWindow.isDestroyed()) {
-                        listenWindow.webContents.send('session-state-changed', { isActive: false });
+                    if (researchWindow && !researchWindow.isDestroyed()) {
+                        researchWindow.webContents.send('session-state-changed', { isActive: false });
                     }
                     break;
         
                 case 'Done':
                     console.log('[ListenService] changeSession to "Done"');
-                    internalBridge.emit('window:requestVisibility', { name: 'listen', visible: false });
-                    listenWindow.webContents.send('session-state-changed', { isActive: false });
+                    // Window visibility is handled by the calling service (ResearchService)
+                    if (researchWindow && !researchWindow.isDestroyed()) {
+                        researchWindow.webContents.send('session-state-changed', { isActive: false });
+                    }
                     break;
         
                 default:
