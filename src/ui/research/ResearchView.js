@@ -421,10 +421,10 @@ export class ResearchView extends LitElement {
             color: #2d3748;
             border-left: 4px solid #48bb78;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: all 0.15s ease; /* Reduced from 0.3s for faster animations */
             opacity: 0;
             transform: translateY(10px);
-            animation: fadeIn 0.5s ease-out forwards;
+            animation: fadeIn 0.25s ease-out forwards; /* Reduced from 0.5s for faster appearance */
         }
 
         .followup-item:hover {
@@ -435,7 +435,7 @@ export class ResearchView extends LitElement {
         }
 
         .followup-item.expiring {
-            animation: fadeOut 0.5s ease-out forwards;
+            animation: fadeOut 0.25s ease-out forwards; /* Reduced from 0.5s for faster removal */
         }
 
         @keyframes fadeIn {
@@ -528,33 +528,67 @@ export class ResearchView extends LitElement {
             margin-bottom: 6px;
         }
 
-        .answer-text {
+        .answer-content {
             font-size: 14px;
             color: #e0e0e0;
             margin-bottom: 8px;
             min-height: 20px;
+        }
+
+        .insights-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .insight-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 4px 0;
+        }
+
+        .insight-bullet {
+            color: #4299e1;
+            font-weight: bold;
+            margin-top: 2px;
+            flex-shrink: 0;
+        }
+
+        .insight-text {
+            flex: 1;
+            color: #e0e0e0;
+            line-height: 1.4;
+        }
+
+        .raw-answer {
+            color: #a0a0a0;
             font-style: italic;
+            white-space: pre-wrap;
+            word-wrap: break-word;
         }
 
-        .completeness-bar {
-            width: 100%;
-            height: 6px;
-            background: #e2e8f0;
-            border-radius: 3px;
-            overflow: hidden;
-            margin-bottom: 4px;
+        .raw-answer.expanded {
+            margin-top: 8px;
+            padding: 8px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            border-left: 2px solid #4299e1;
+            font-style: normal;
+            color: #c0c0c0;
         }
 
-        .completeness-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #ed8936, #48bb78);
-            transition: width 0.3s ease;
-        }
-
-        .completeness-label {
+        .raw-answer-toggle {
+            margin-top: 8px;
             font-size: 12px;
-            color: #718096;
-            text-align: right;
+            color: #4299e1;
+            cursor: pointer;
+            user-select: none;
+            transition: color 0.2s ease;
+        }
+
+        .raw-answer-toggle:hover {
+            color: #63b3ed;
         }
 
         .no-current-question {
@@ -646,6 +680,7 @@ export class ResearchView extends LitElement {
         currentQuestion: { type: Object, state: true },
         showPendingQuestions: { type: Boolean, state: true },
         showAskedQuestions: { type: Boolean, state: true },
+        showRawAnswer: { type: Boolean, state: true },
         
         // Question Detection Properties
         detectedQuestion: { type: Object, state: true },
@@ -669,6 +704,7 @@ export class ResearchView extends LitElement {
         this.currentQuestion = null;
         this.showPendingQuestions = true;
         this.showAskedQuestions = false;
+        this.showRawAnswer = false;
         
         // Question Detection
         this.detectedQuestion = null;
@@ -865,6 +901,16 @@ export class ResearchView extends LitElement {
         super.connectedCallback();
         console.log('[ResearchView] Connected to DOM - setting up event listeners');
         
+        // Debug: Check if audio capture is available
+        console.log('[ResearchView] Audio capture available:', !!window.pickleGlass?.startCapture);
+        console.log('[ResearchView] Listen capture API available:', !!window.api?.listenCapture);
+        console.log('[ResearchView] Current URL:', window.location.href);
+        
+        // Send a ping to main process so we know frontend loaded
+        if (window.api?.research?.ping) {
+            window.api.research.ping('ResearchView connected and ready');
+        }
+        
         if (window.api?.research) {
             // Existing listeners
             window.api.research.onSessionStarted(this._handleSessionStarted.bind(this));
@@ -874,10 +920,18 @@ export class ResearchView extends LitElement {
             
             // Question Detection Listeners
             window.api.research.onQuestionDetected(this._handleQuestionDetected.bind(this));
-            window.api.research.onCurrentQuestionChanged(this._handleCurrentQuestionChanged.bind(this));
             window.api.research.onAmbiguousQuestionDetected(this._handleAmbiguousQuestionDetected.bind(this));
             window.api.research.onOffScriptQuestionDetected(this._handleOffScriptQuestionDetected.bind(this));
             window.api.research.onQuestionDetectionUpdate(this._handleQuestionDetectionUpdate.bind(this));
+        }
+        
+        // Listen for audio capture state changes
+        if (window.api?.listenCapture?.onChangeListenCaptureState) {
+            window.api.listenCapture.onChangeListenCaptureState((event, data) => {
+                console.log('[ResearchView] Audio capture state change received:', data);
+            });
+        } else {
+            console.warn('[ResearchView] onChangeListenCaptureState not available');
         }
         
         // Set up keyboard shortcuts for manual override
@@ -896,7 +950,6 @@ export class ResearchView extends LitElement {
             
             // Remove Question Detection Listeners
             window.api.research.removeOnQuestionDetected(this._handleQuestionDetected);
-            window.api.research.removeOnCurrentQuestionChanged(this._handleCurrentQuestionChanged);
             window.api.research.removeOnAmbiguousQuestionDetected(this._handleAmbiguousQuestionDetected);
             window.api.research.removeOnOffScriptQuestionDetected(this._handleOffScriptQuestionDetected);
             window.api.research.removeOnQuestionDetectionUpdate(this._handleQuestionDetectionUpdate);
@@ -937,6 +990,11 @@ export class ResearchView extends LitElement {
             studyQuestionCount: data?.study?.questions?.length || 0,
             questionsCount: data?.questionsCount || 0
         });
+        
+        // Send ping to main process so we know this event was received
+        if (window.api?.research?.ping) {
+            window.api.research.ping(`Session started event received: ${data?.studyTitle || data?.study?.title || 'unknown'} (${data?.questionsCount || 0} questions)`);
+        }
         
         // Extract study information from the session start data
         if (data && data.study) {
@@ -1006,11 +1064,97 @@ export class ResearchView extends LitElement {
 
     _handleAnalysisUpdate(event, data) {
         console.log('Research analysis update received:', data.suggestions?.length || 0, 'suggestions');
+        
+        // COMPREHENSIVE DATA DEBUGGING - Let's see exactly what we're getting
+        console.log('🔍 FULL DATA DEBUG - Complete data object received:', JSON.stringify(data, null, 2));
+        
+        // Debug current question data extensively
+        console.log('🎯 Current Question Debug:', {
+            hasCurrentQuestion: !!data.currentQuestion,
+            currentQuestionType: typeof data.currentQuestion,
+            currentQuestionKeys: data.currentQuestion ? Object.keys(data.currentQuestion) : null,
+            questionText: data.currentQuestion?.questionText,
+            questionId: data.currentQuestion?.questionId,
+            fullCurrentQuestion: data.currentQuestion
+        });
+        
+        // Debug insights data
+        if (data.currentQuestion?.keyInsights) {
+            console.log('🔍 UI INSIGHTS DEBUG - Received insights:', {
+                type: typeof data.currentQuestion.keyInsights,
+                isArray: Array.isArray(data.currentQuestion.keyInsights),
+                length: data.currentQuestion.keyInsights.length,
+                fullInsights: data.currentQuestion.keyInsights,
+                first3: Array.isArray(data.currentQuestion.keyInsights) ? 
+                    data.currentQuestion.keyInsights.slice(0, 3) : 
+                    String(data.currentQuestion.keyInsights).slice(0, 50)
+            });
+            
+            // Test quality filter on each insight
+            console.log('🔍 QUALITY FILTER TEST:');
+            data.currentQuestion.keyInsights.forEach((insight, index) => {
+                const passes = this._isQualityInsight(insight);
+                console.log(`  Insight ${index + 1}: ${passes ? 'PASS' : 'FAIL'} - "${insight}"`);
+            });
+        } else {
+            console.log('🔍 UI INSIGHTS DEBUG - No insights in current question data');
+        }
+        
+        // Track insights changes specifically
+        const oldInsights = this.currentQuestion?.keyInsights || [];
+        const newInsights = data.currentQuestion?.keyInsights || [];
+        const insightsChanged = JSON.stringify(oldInsights) !== JSON.stringify(newInsights);
+        
+        console.log('🔍 UI INSIGHTS CHANGE DETECTION:', {
+            insightsChanged,
+            oldInsightsCount: oldInsights.length,
+            newInsightsCount: newInsights.length,
+            oldInsights: oldInsights,
+            newInsights: newInsights
+        });
+        
+        // Send ping to main process so we know this event was received
+        if (window.api?.research?.ping) {
+            window.api.research.ping(`Analysis update received: ${data.suggestions?.length || 0} suggestions, current question: ${data.currentQuestion?.questionText || 'none'}`);
+        }
+        
+        // Check if anything actually changed before forcing a re-render
+        const suggestionsChanged = JSON.stringify(this.suggestions) !== JSON.stringify(data.suggestions || []);
+        const statusChanged = this.sessionStatus !== data.status;
+        const questionChanged = JSON.stringify(this.currentQuestion) !== JSON.stringify(data.currentQuestion);
+        
+        console.log('🎯 Current Question Change Detection:', {
+            questionChanged,
+            insightsChanged,
+            suggestionsChanged,
+            statusChanged,
+            oldQuestion: this.currentQuestion?.questionText,
+            newQuestion: data.currentQuestion?.questionText,
+            willUpdate: suggestionsChanged || statusChanged || questionChanged || insightsChanged
+        });
+        
+        // Reset raw answer expansion if question changed
+        if (questionChanged) {
+            this.showRawAnswer = false;
+        }
+        
         this.sessionStatus = data.status;
         this.suggestions = data.suggestions || [];
         this.currentQuestion = data.currentQuestion || null;
         this.followUpMetrics = data.followUpMetrics || this.followUpMetrics;
-        this.requestUpdate(); // Force re-render to show updated data
+        
+        console.log('🎯 After setting currentQuestion:', {
+            hasCurrentQuestion: !!this.currentQuestion,
+            questionText: this.currentQuestion?.questionText,
+            questionId: this.currentQuestion?.questionId,
+            hasKeyInsights: !!this.currentQuestion?.keyInsights,
+            keyInsightsLength: this.currentQuestion?.keyInsights?.length || 0
+        });
+        
+        // FORCE UPDATE: Always re-render when analysis-update is received 
+        // The change detection is failing to detect insights properly
+        console.log('🎯 FORCE UPDATE: Always triggering requestUpdate for analysis-update events');
+        this.requestUpdate();
     }
 
     _handleFollowUpExpired(event, data) {
@@ -1043,31 +1187,9 @@ export class ResearchView extends LitElement {
         this.requestUpdate();
     }
 
-    _handleCurrentQuestionChanged(event, data) {
-        console.log('[ResearchView] Current question changed:', data);
-        
-        const { questionId, question, detectionData } = data;
-        
-        if (question) {
-            this.currentQuestion = {
-                questionText: question.question_text,
-                category: question.category || 'general',
-                priority: question.priority || 'medium',
-                status: 'in_progress',
-                detectionConfidence: detectionData.score,
-                detectionType: detectionData.type,
-                currentAnswer: '', // Will be filled as participant responds
-                completeness_score: 0
-            };
-            
-            // Update session status
-            if (this.sessionStatus.questionBreakdown[questionId]) {
-                this.sessionStatus.questionBreakdown[questionId].status = 'in_progress';
-            }
-        }
-        
-        this.requestUpdate();
-    }
+    // REMOVED: _handleCurrentQuestionChanged method
+    // This was overwriting complete current question data (answer + insights) from analysis-update events
+    // The analysis-update event handler now provides all current question data
 
     _handleAmbiguousQuestionDetected(event, data) {
         console.log('[ResearchView] Ambiguous question detected:', data);
@@ -1099,6 +1221,39 @@ export class ResearchView extends LitElement {
         console.log('[ResearchView] Question detection update:', data);
         this.lastDetectionUpdate = data;
         this.detectionConfidence = data.score || 0;
+        this.requestUpdate();
+    }
+
+    // ==================== UI INTERACTION HANDLERS ====================
+
+    _handlePendingQuestionsToggle(e) {
+        // Prevent event bubbling and ensure click is processed
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // Use requestAnimationFrame to ensure the click happens after any pending renders
+        requestAnimationFrame(() => {
+            this.showPendingQuestions = !this.showPendingQuestions;
+            console.log('Pending questions toggled:', this.showPendingQuestions);
+            this.requestUpdate();
+        });
+    }
+
+    _handleAskedQuestionsToggle(e) {
+        // Prevent event bubbling and ensure click is processed
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // Use requestAnimationFrame to ensure the click happens after any pending renders
+        requestAnimationFrame(() => {
+            this.showAskedQuestions = !this.showAskedQuestions;
+            console.log('Asked questions toggled:', this.showAskedQuestions);
+            this.requestUpdate();
+        });
+    }
+
+    _toggleRawAnswer() {
+        this.showRawAnswer = !this.showRawAnswer;
         this.requestUpdate();
     }
 
@@ -1192,20 +1347,12 @@ export class ResearchView extends LitElement {
     }
 
     renderLiveDashboard() {
-        console.log('[ResearchView] Rendering Live Dashboard');
-        // If no study is loaded yet, show a waiting state
-        if (!this.currentStudy) {
-            console.log('[ResearchView] No current study, showing waiting state');
-            return html`
-                <div class="section">
-                    <h3 class="section-title">Waiting for Interview to Start</h3>
-                    <div class="no-current-question">
-                        Select a study from the header and click "Start Interview" to begin.
-                    </div>
-                </div>
-            `;
-        }
-
+        console.log('🔥 RENDER CALLED - renderLiveDashboard executing', {
+            hasCurrentQuestion: !!this.currentQuestion,
+            currentQuestionKeys: this.currentQuestion ? Object.keys(this.currentQuestion) : null,
+            keyInsightsLength: this.currentQuestion?.keyInsights?.length || 0
+        });
+        
         if (!this.sessionStatus) {
             console.log('[ResearchView] Session status not available, showing loading state');
             return html`<div>Loading session...</div>`;
@@ -1246,7 +1393,7 @@ export class ResearchView extends LitElement {
                                 <div class="followup-item ${this.expiringQuestions.has(suggestion.id) ? 'expiring' : ''}"
                                      @click="${() => this._markFollowUpAsAsked(suggestion.id)}"
                                      data-age="${suggestion.age}ms"
-                                     style="animation-delay: ${this.expiringQuestions.has(suggestion.id) ? '0s' : (index * 0.1) + 's'}">
+                                     style="animation-delay: ${this.expiringQuestions.has(suggestion.id) ? '0s' : (index * 0.05) + 's'}">
                                     <div class="followup-text">${suggestion.text}</div>
                                     <div class="followup-age">shown ${Math.round(suggestion.age / 1000)}s ago</div>
                                 </div>
@@ -1265,29 +1412,78 @@ export class ResearchView extends LitElement {
                                 <div class="question-text">${this.currentQuestion.questionText}</div>
                                 
                                 <div class="answer-section">
-                                    <div class="answer-label">Answer:</div>
-                                    <div class="answer-text">
-                                        ${this.currentQuestion.currentAnswer || 'No answer yet...'}
-                                    </div>
-                                    <div class="completeness-bar">
-                                        <div class="completeness-fill" 
-                                             style="width: ${(this.currentQuestion.completeness_score || 0) * 100}%"></div>
-                                    </div>
-                                    <div class="completeness-label">
-                                        ${Math.round((this.currentQuestion.completeness_score || 0) * 100)}% complete
+                                    <div class="answer-label">Key Insights:</div>
+                                    <div class="answer-content">
+                                        ${(() => {
+                                            // RENDER DEBUG - Let's see what happens during rendering
+                                            console.log('🎨 RENDER DEBUG - Starting insights rendering:', {
+                                                hasCurrentQuestion: !!this.currentQuestion,
+                                                hasKeyInsights: !!this.currentQuestion?.keyInsights,
+                                                keyInsightsType: typeof this.currentQuestion?.keyInsights,
+                                                keyInsightsIsArray: Array.isArray(this.currentQuestion?.keyInsights),
+                                                keyInsightsLength: this.currentQuestion?.keyInsights?.length || 0,
+                                                rawKeyInsights: this.currentQuestion?.keyInsights
+                                            });
+                                            
+                                            // Filter out low-quality insights  
+                                            const qualityInsights = this.currentQuestion.keyInsights
+                                                ?.filter(insight => {
+                                                    const passes = this._isQualityInsight(insight);
+                                                    console.log(`🎨 RENDER QUALITY TEST: "${insight}" -> ${passes ? 'PASS' : 'FAIL'}`);
+                                                    return passes;
+                                                })
+                                                ?.slice(0, 10) || []; // Limit to max 10 insights
+                                            
+                                            console.log('🎨 RENDER DEBUG - After quality filtering:', {
+                                                originalCount: this.currentQuestion?.keyInsights?.length || 0,
+                                                qualityCount: qualityInsights.length,
+                                                qualityInsights: qualityInsights
+                                            });
+                                            
+                                            // Only show insights section if we have meaningful insights
+                                            if (qualityInsights.length > 0) {
+                                                console.log('🎨 RENDER DEBUG - Rendering insights section with', qualityInsights.length, 'insights');
+                                                return html`
+                                                    <div class="insights-list">
+                                                        ${qualityInsights.map(insight => html`
+                                                            <div class="insight-item">
+                                                                <span class="insight-bullet">●</span>
+                                                                <span class="insight-text">${insight}</span>
+                                                            </div>
+                                                        `)}
+                                                    </div>
+                                                    ${this.currentQuestion.currentAnswer && this.currentQuestion.currentAnswer.length > 50 ? html`
+                                                        <div class="raw-answer-toggle" @click="${() => this._toggleRawAnswer()}">
+                                                            ${this.showRawAnswer ? '▼ Hide full answer' : '▶ Show full answer'}
+                                                        </div>
+                                                        ${this.showRawAnswer ? html`
+                                                            <div class="raw-answer expanded">
+                                                                ${this.currentQuestion.currentAnswer}
+                                                            </div>
+                                                        ` : ''}
+                                                    ` : ''}
+                                                `;
+                                            } else {
+                                                console.log('🎨 RENDER DEBUG - No quality insights, showing raw answer fallback');
+                                                return html`
+                                                    <div class="raw-answer">
+                                                        ${this.currentQuestion.currentAnswer || 'No answer yet...'}
+                                                    </div>
+                                                `;
+                                            }
+                                        })()}
                                     </div>
                                 </div>
                             </div>
                         ` : html`
-                            <div class="no-current-question">No active question detected</div>
-                        `}
+                            <div class="no-current-question">No active question detected</div>`}
                     </div>
                 </div>
 
                 <!-- Pending Questions Section (Collapsible) -->
                 <div class="section collapsible-section">
                     <h3 class="section-title collapsible" 
-                        @click="${() => this.showPendingQuestions = !this.showPendingQuestions}">
+                        @click="${this._handlePendingQuestionsToggle}">
                         <span class="collapse-icon ${this.showPendingQuestions ? 'expanded' : ''}">▶</span>
                         📋 Pending Questions (${pendingQuestions.length})
                     </h3>
@@ -1306,7 +1502,7 @@ export class ResearchView extends LitElement {
                 <!-- Questions Already Asked Section (Collapsible) -->
                 <div class="section collapsible-section">
                     <h3 class="section-title collapsible" 
-                        @click="${() => this.showAskedQuestions = !this.showAskedQuestions}">
+                        @click="${this._handleAskedQuestionsToggle}">
                         <span class="collapse-icon ${this.showAskedQuestions ? 'expanded' : ''}">▶</span>
                         ✅ Questions Already Asked (${askedQuestions.length})
                     </h3>
@@ -1356,6 +1552,34 @@ export class ResearchView extends LitElement {
 
     // ==================== INTERNAL UTILITIES ====================
 
+    _isQualityInsight(insight) {
+        if (!insight || typeof insight !== 'string') return false;
+        
+        const trimmed = insight.trim();
+        if (trimmed.length < 10) return false; // Too short
+        
+        // Filter out "no information" type insights (same as backend)
+        const badPhrases = [
+            'no information',
+            'did not provide', 
+            'participant did not',
+            'no specific',
+            'no clear',
+            'unclear',
+            'not mentioned',
+            'did not answer',
+            'did not elaborate',
+            'no details',
+            'not provided',
+            'response was',
+            'single word',
+            'actionable insights',
+            'behaviors has been provided'
+        ];
+        
+        const lowerInsight = trimmed.toLowerCase();
+        return !badPhrases.some(phrase => lowerInsight.includes(phrase));
+    }
 }
 
 console.log('[ResearchView] Defining custom element research-view');

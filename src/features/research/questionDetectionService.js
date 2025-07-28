@@ -2,6 +2,16 @@ const { EventEmitter } = require('events');
 const modelStateService = require('../common/services/modelStateService');
 const { createEmbedding, createLLM } = require('../common/ai/factory');
 
+// Utility function to create formatted timestamps for logs
+function timestamp() {
+    return new Date().toISOString().substr(11, 12); // HH:MM:SS.mmm format
+}
+
+// Utility function for timestamped logging
+function logWithTimestamp(level = 'log', ...args) {
+    console[level](`${timestamp()} [QuestionDetectionService]`, ...args);
+}
+
 /**
  * QuestionDetectionService
  * 
@@ -18,9 +28,11 @@ class QuestionDetectionService extends EventEmitter {
         this.questionBank = new Map(); // questionId -> { question, embedding }
         this.sttBuffer = [];
         this.bufferTimeout = null;
-        this.processingTimeoutId = null;
+        this.processingTimeoutId = null; // Legacy - will be removed
+        this.refinementTimeoutId = null; // New: timeout for delayed refinement processing
         this.lastQuestionAt = 0;
         this.currentQuestionId = null;
+        this.lastImmediatelyProcessedText = null; // Track what we've already processed immediately
         
         // Embedding client (lazy-loaded)
         this.embeddingClient = null;
@@ -34,10 +46,10 @@ class QuestionDetectionService extends EventEmitter {
         this.maxCacheSize = 50; // Keep cache manageable
         
         // Confidence thresholds - adjusted for LLM embeddings (higher similarity expected)
-        this.confidence_threshold_high = 0.85; // High confidence for direct match (LLM embeddings are more precise)
-        this.confidence_threshold_low = 0.70;  // Below this is likely off-script
+        this.confidence_threshold_high = 0.75; // High confidence for direct match (more permissive for real-world usage)
+        this.confidence_threshold_low = 0.55;  // Below this is likely off-script (lowered from 0.70)
         
-        console.log('[QuestionDetectionService] Service initialized');
+        logWithTimestamp('log', `Service initialized`);
     }
 
     /**
@@ -46,7 +58,7 @@ class QuestionDetectionService extends EventEmitter {
      */
     async startDetection(studyQuestions = []) {
         try {
-            console.log('[QuestionDetectionService] Starting detection with', studyQuestions.length, 'study questions');
+            logWithTimestamp('log', `Starting detection with`, studyQuestions.length, 'study questions');
             
             this.currentStudyQuestions = studyQuestions;
             await this._buildQuestionBank(studyQuestions);
@@ -54,9 +66,9 @@ class QuestionDetectionService extends EventEmitter {
             this.isActive = true;
             this.emit('detection-started', { questionCount: studyQuestions.length });
             
-            console.log('[QuestionDetectionService] Detection started successfully');
+            logWithTimestamp('log', `Detection started successfully`);
         } catch (error) {
-            console.error('[QuestionDetectionService] Failed to start detection:', error);
+            logWithTimestamp('error', `Failed to start detection:`, error);
             throw error;
         }
     }
@@ -65,16 +77,21 @@ class QuestionDetectionService extends EventEmitter {
      * Stop question detection
      */
     stopDetection() {
-        console.log('[QuestionDetectionService] Stopping detection');
+        logWithTimestamp('log', `Stopping detection`);
         
         this.isActive = false;
         this.questionBank.clear();
         this.sttBuffer = [];
+        this.lastImmediatelyProcessedText = null;
         
         // Clean up timeouts
         if (this.processingTimeoutId) {
             clearTimeout(this.processingTimeoutId);
             this.processingTimeoutId = null;
+        }
+        if (this.refinementTimeoutId) {
+            clearTimeout(this.refinementTimeoutId);
+            this.refinementTimeoutId = null;
         }
         
         // Clean up clients
@@ -98,11 +115,11 @@ class QuestionDetectionService extends EventEmitter {
         // SAFETY CHECK: Only process moderator/interviewer audio for question detection
         // Ignore participant responses to avoid false question detection
         if (speaker !== 'moderator') {
-            console.log(`[QuestionDetectionService] Ignoring non-moderator audio from ${speaker}: "${transcript.substring(0, 30)}..."`);
+            logWithTimestamp('log', `Ignoring non-moderator audio from ${speaker}: "${transcript.substring(0, 30)}..."`);
             return;
         }
 
-        console.log('[QuestionDetectionService] Processing moderator transcript for question detection:', { 
+        logWithTimestamp('log', `Processing moderator transcript for question detection:`, { 
             text: transcript.substring(0, 50) + '...', 
             speaker 
         });
@@ -115,54 +132,102 @@ class QuestionDetectionService extends EventEmitter {
             this.sttBuffer = this.sttBuffer.slice(-25);
         }
 
-        // Debounce processing to wait for complete sentences
-        if (this.processingTimeoutId) {
-            clearTimeout(this.processingTimeoutId);
+        // NEW APPROACH: Process immediately for speed, then refine for accuracy
+        
+        // 1. IMMEDIATE PROCESSING: Process current buffer right away for fast response
+        //    But only if we haven't already processed this text immediately
+        const currentText = this.sttBuffer.map(item => item.text).join(' ').trim();
+        const hasNewContent = currentText !== this.lastImmediatelyProcessedText;
+        
+        if (hasNewContent) {
+            logWithTimestamp('log', `Processing immediately for fast response...`);
+            this.lastImmediatelyProcessedText = currentText;
+            await this._processBufferedTranscript('immediate');
+        } else {
+            logWithTimestamp('log', `Skipping immediate processing - no new content since last immediate pass`);
+        }
+
+        // 2. DELAYED REFINEMENT: Also schedule a refinement pass with more complete text
+        if (this.refinementTimeoutId) {
+            clearTimeout(this.refinementTimeoutId);
         }
         
-        // Dynamic timeout based on content - faster for more real-time feel
         const combinedText = this.sttBuffer.map(item => item.text).join(' ');
         const mightBeQuestion = this._containsQuestionIndicators(combinedText);
-        const timeout = mightBeQuestion ? 1200 : 800; // Faster processing for real-time feel
+        const refinementTimeout = mightBeQuestion ? 600 : 400; // Time to wait for complete sentences
         
-        console.log(`[QuestionDetectionService] Setting ${timeout}ms timeout (question indicators: ${mightBeQuestion})`);
+        logWithTimestamp('log', `Scheduling refinement in ${refinementTimeout}ms (question indicators: ${mightBeQuestion})`);
         
-        this.processingTimeoutId = setTimeout(() => {
-            this._processBufferedTranscript();
-        }, timeout);
+        this.refinementTimeoutId = setTimeout(async () => {
+            logWithTimestamp('log', `Running refinement pass with buffer content (fallback)...`);
+            await this._processBufferedTranscript('refinement');
+        }, refinementTimeout);
+    }
+
+    /**
+     * Process a complete interviewer turn with full context
+     * This is called by ResearchService when it has the complete interviewer turn
+     * @param {string} fullTurnText - Complete interviewer turn text
+     */
+    async processCompleteInterviewerTurn(fullTurnText) {
+        if (!this.isActive || !fullTurnText || fullTurnText.trim().length === 0) return;
+        
+        logWithTimestamp('log', `Processing complete interviewer turn: "${fullTurnText.substring(0, 100)}..."`);
+        
+        // Cancel any pending refinement timeout since we have the complete turn
+        if (this.refinementTimeoutId) {
+            clearTimeout(this.refinementTimeoutId);
+            this.refinementTimeoutId = null;
+            logWithTimestamp('log', `Cancelled pending refinement - using complete turn context`);
+        }
+        
+        // Process with full context for better question matching
+        await this._processBufferedTranscript('refinement', fullTurnText);
     }
 
     /**
      * Process buffered transcript for complete sentences
+     * @param {string} mode - 'immediate' for fast processing, 'refinement' for complete text
+     * @param {string} fullContext - Complete interviewer turn context (for refinement mode)
      */
-    async _processBufferedTranscript() {
-        if (this.sttBuffer.length === 0) return;
+    async _processBufferedTranscript(mode = 'refinement', fullContext = null) {
+        if (this.sttBuffer.length === 0 && !fullContext) return;
 
-        // Combine recent buffer into complete text
-        const combinedText = this.sttBuffer
-            .map(item => item.text)
-            .join(' ')
-            .trim();
+        // For refinement mode with full context: use the complete interviewer turn
+        // For immediate mode or no context: use the current buffer
+        const combinedText = (mode === 'refinement' && fullContext) 
+            ? fullContext.trim()
+            : this.sttBuffer
+                .map(item => item.text)
+                .join(' ')
+                .trim();
 
-        console.log('[QuestionDetectionService] Processing combined text:', combinedText);
+        logWithTimestamp('log', `Processing combined text (${mode} mode):`, combinedText);
+        
+        if (mode === 'refinement' && fullContext) {
+            logWithTimestamp('log', `Using full interviewer turn context for refinement (${combinedText.length} chars)`);
+        }
 
         // NEW: Extract potential questions from mixed content
         const extractedQuestions = await this._extractQuestionsFromText(combinedText);
         
         if (extractedQuestions.length === 0) {
-            console.log('[QuestionDetectionService] No questions found in text');
+            logWithTimestamp('log', `No questions found in text (${mode} mode)`);
             return;
         }
 
         // Process each extracted question
         for (const questionText of extractedQuestions) {
-            console.log('[QuestionDetectionService] Processing extracted question:', questionText);
+            logWithTimestamp('log', `Processing extracted question (${mode} mode):`, questionText);
             
-            // Avoid processing the same utterance twice
-            if (questionText === this.lastUtterance) {
-                console.log('[QuestionDetectionService] Skipping duplicate utterance');
+            // For immediate mode: always process (fast feedback)
+            // For refinement mode: avoid processing the same question twice
+            if (mode === 'refinement' && questionText === this.lastUtterance) {
+                logWithTimestamp('log', `Skipping duplicate utterance in refinement mode`);
                 continue;
             }
+            
+            // Update last utterance to prevent future duplicates
             this.lastUtterance = questionText;
 
             // Find best matching study question
@@ -171,15 +236,21 @@ class QuestionDetectionService extends EventEmitter {
             const event = {
                 utc: Date.now(),
                 text: questionText,
+                mode: mode, // Track which mode detected this
                 ...matchResult
             };
 
-            console.log('[QuestionDetectionService] Question detected:', event);
+            logWithTimestamp('log', `Question detected (${mode} mode):`, event);
             this.emit('question-detected', event);
         }
 
-        // Clear buffer after processing
-        this.sttBuffer = [];
+        // Clear buffer after refinement processing (but not immediate processing)
+        if (mode === 'refinement') {
+            this.sttBuffer = [];
+            logWithTimestamp('log', `Buffer cleared after refinement processing`);
+            // Clear the immediate processing tracker after refinement
+            this.lastImmediatelyProcessedText = null;
+        }
     }
 
     /**
@@ -196,7 +267,7 @@ class QuestionDetectionService extends EventEmitter {
             .map(s => s.trim())
             .filter(s => s.length > 0);
         
-        console.log('[QuestionDetectionService] Split into sentences:', sentences);
+        logWithTimestamp('log', `Split into sentences:`, sentences);
         
         for (const sentence of sentences) {
             if (this._looksLikeQuestion(sentence)) {
@@ -209,7 +280,7 @@ class QuestionDetectionService extends EventEmitter {
                 }
                 
                 questions.push(cleanQuestion);
-                console.log('[QuestionDetectionService] Extracted question (pattern-based):', cleanQuestion);
+                logWithTimestamp('log', `Extracted question (pattern-based):`, cleanQuestion);
             }
         }
         
@@ -219,21 +290,21 @@ class QuestionDetectionService extends EventEmitter {
         }
         
         // Fallback: LLM-based intelligent question extraction
-        console.log('[QuestionDetectionService] Pattern-based extraction failed, trying LLM fallback...');
+        logWithTimestamp('log', `Pattern-based extraction failed, trying LLM fallback...`);
         
         try {
             const llmQuestions = await this._extractQuestionsWithLLM(text);
             if (llmQuestions.length > 0) {
-                console.log('[QuestionDetectionService] LLM extracted questions:', llmQuestions);
+                logWithTimestamp('log', `LLM extracted questions:`, llmQuestions);
                 return llmQuestions;
             }
         } catch (error) {
-            console.error('[QuestionDetectionService] LLM question extraction failed:', error.message);
+            logWithTimestamp('error', `LLM question extraction failed:`, error.message);
         }
         
         // Final fallback: If LLM also fails, check if whole text might be a question
         if (this._looksLikeQuestion(text)) {
-            console.log('[QuestionDetectionService] Using whole text as potential question');
+            logWithTimestamp('log', `Using whole text as potential question`);
             const cleanText = text.trim();
             return [cleanText.endsWith('?') ? cleanText : cleanText + '?'];
         }
@@ -250,14 +321,14 @@ class QuestionDetectionService extends EventEmitter {
         try {
             // Performance optimization: Skip LLM for obvious non-questions
             if (!this._worthLLMAnalysis(text)) {
-                console.log('[QuestionDetectionService] Text not worth LLM analysis, skipping');
+                logWithTimestamp('log', `Text not worth LLM analysis, skipping`);
                 return [];
             }
             
             // Check cache first
             const cachedQuestions = this.llmCache.get(text);
             if (cachedQuestions) {
-                console.log('[QuestionDetectionService] Using cached LLM questions for:', text);
+                logWithTimestamp('log', `Using cached LLM questions for:`, text);
                 return cachedQuestions;
             }
 
@@ -267,19 +338,19 @@ class QuestionDetectionService extends EventEmitter {
             }
             
             if (!this.llmClient) {
-                console.warn('[QuestionDetectionService] LLM client not available for question extraction');
+                logWithTimestamp('warn', `LLM client not available for question extraction`);
                 return [];
             }
             
             const prompt = this._buildQuestionExtractionPrompt(text);
             
-            console.log('[QuestionDetectionService] Sending text to LLM for question extraction...');
+            logWithTimestamp('log', `Sending text to LLM for question extraction...`);
             const response = await this.llmClient.chat([
                 { role: 'user', content: prompt }
             ]);
             
             const result = this._parseQuestionExtractionResponse(response.content);
-            console.log('[QuestionDetectionService] LLM extraction result:', result);
+            logWithTimestamp('log', `LLM extraction result:`, result);
             
             // Cache the result
             if (result.questions.length > 0) {
@@ -293,7 +364,7 @@ class QuestionDetectionService extends EventEmitter {
             return result.questions || [];
             
         } catch (error) {
-            console.error('[QuestionDetectionService] LLM question extraction error:', error);
+            logWithTimestamp('error', `LLM question extraction error:`, error);
             return [];
         }
     }
@@ -351,12 +422,12 @@ class QuestionDetectionService extends EventEmitter {
         try {
             if (this.llmClient) return; // Already initialized
             
-            console.log('[QuestionDetectionService] Initializing LLM client for question extraction...');
+            logWithTimestamp('log', `Initializing LLM client for question extraction...`);
             
             const modelInfo = await modelStateService.getCurrentModelInfo('llm');
             
             if (!modelInfo || !modelInfo.apiKey) {
-                console.warn('[QuestionDetectionService] No LLM configuration found');
+                logWithTimestamp('warn', `No LLM configuration found`);
                 return;
             }
             
@@ -367,10 +438,10 @@ class QuestionDetectionService extends EventEmitter {
                 maxTokens: 500    // Short responses for question extraction
             });
             
-            console.log(`[QuestionDetectionService] LLM client initialized (${modelInfo.provider})`);
+            logWithTimestamp('log', `LLM client initialized (${modelInfo.provider})`);
             
         } catch (error) {
-            console.error('[QuestionDetectionService] Failed to initialize LLM client:', error);
+            logWithTimestamp('error', `Failed to initialize LLM client:`, error);
             this.llmClient = null;
         }
     }
@@ -421,7 +492,7 @@ Examples:
             // Try to extract JSON from response
             const jsonMatch = response.match(/\{[\s\S]*\}/);
             if (!jsonMatch) {
-                console.warn('[QuestionDetectionService] No JSON found in LLM response');
+                logWithTimestamp('warn', `No JSON found in LLM response`);
                 return { questions: [] };
             }
             
@@ -429,7 +500,7 @@ Examples:
             
             // Validate result structure
             if (!Array.isArray(result.questions)) {
-                console.warn('[QuestionDetectionService] Invalid LLM response structure');
+                logWithTimestamp('warn', `Invalid LLM response structure`);
                 return { questions: [] };
             }
             
@@ -445,7 +516,7 @@ Examples:
             };
             
         } catch (error) {
-            console.error('[QuestionDetectionService] Failed to parse LLM response:', error);
+            logWithTimestamp('error', `Failed to parse LLM response:`, error);
             return { questions: [] };
         }
     }
@@ -505,7 +576,7 @@ Examples:
         });
         
         if (startsWithQuestion) {
-            console.log('[QuestionDetectionService] Question detected by start pattern');
+            logWithTimestamp('log', `Question detected by start pattern`);
             return true;
         }
 
@@ -517,7 +588,7 @@ Examples:
         });
 
         if (containsQuestionPattern) {
-            console.log('[QuestionDetectionService] Question detected by contained pattern');
+            logWithTimestamp('log', `Question detected by contained pattern`);
             return true;
         }
 
@@ -546,7 +617,7 @@ Examples:
             const hasQuestionContext = /\b(your|you|how|what|when|why|tell|describe|think|feel|experience)\b/.test(cleanText);
             
             if (hasQuestionContext) {
-                console.log('[QuestionDetectionService] Question detected by study keywords + context');
+                logWithTimestamp('log', `Question detected by study keywords + context`);
                 return true;
             }
         }
@@ -563,7 +634,7 @@ Examples:
         );
 
         if (hasQuestionIntonation) {
-            console.log('[QuestionDetectionService] Question detected by intonation pattern');
+            logWithTimestamp('log', `Question detected by intonation pattern`);
             return true;
         }
 
@@ -575,7 +646,7 @@ Examples:
      * @param {Array} studyQuestions - Study questions to build bank from
      */
     async _buildQuestionBank(studyQuestions) {
-        console.log('[QuestionDetectionService] Building question bank...');
+        logWithTimestamp('log', `Building question bank...`);
         
         this.questionBank.clear();
         
@@ -588,13 +659,13 @@ Examples:
                     embedding: embedding
                 });
                 
-                console.log(`[QuestionDetectionService] Added question to bank: ${question.id} - "${question.question_text?.substring(0, 50)}..."`);
+                logWithTimestamp('log', `Added question to bank: ${question.id} - "${question.question_text?.substring(0, 50)}..."`);
             } catch (error) {
-                console.error(`[QuestionDetectionService] Failed to embed question ${question.id}:`, error);
+                logWithTimestamp('error', `Failed to embed question ${question.id}:`, error);
             }
         }
         
-        console.log('[QuestionDetectionService] Question bank built with', this.questionBank.size, 'questions');
+        logWithTimestamp('log', `Question bank built with`, this.questionBank.size, `questions`);
     }
 
     /**
@@ -630,7 +701,7 @@ Examples:
                 }
             }
 
-            console.log('[QuestionDetectionService] Best match:', { 
+            logWithTimestamp('log', `Best match:`, { 
                 questionId: bestMatch?.questionId?.substring(0, 8), 
                 questionText: bestMatch?.question?.question_text?.substring(0, 50),
                 score: Math.round(bestScore * 100) / 100,
@@ -665,7 +736,7 @@ Examples:
             }
 
         } catch (error) {
-            console.error('[QuestionDetectionService] Error in question matching:', error);
+            logWithTimestamp('error', `Error in question matching:`, error);
             return {
                 type: 'off_script',
                 questionId: null,
@@ -688,16 +759,16 @@ Examples:
             }
             
             if (this.embeddingClient) {
-                console.log(`[QuestionDetectionService] Generating LLM embedding for: "${text.substring(0, 50)}..."`);
+                logWithTimestamp('log', `Generating LLM embedding for: "${text.substring(0, 50)}..."`);
                 const embedding = await this.embeddingClient.embed(text);
-                console.log(`[QuestionDetectionService] Generated ${embedding.length}-dimensional embedding`);
+                logWithTimestamp('log', `Generated ${embedding.length}-dimensional embedding`);
                 return embedding;
             } else {
-                console.warn('[QuestionDetectionService] LLM embeddings not available, using fallback');
+                logWithTimestamp('warn', `LLM embeddings not available, using fallback`);
                 return this._simpleTextEmbedding(text);
             }
         } catch (error) {
-            console.error('[QuestionDetectionService] LLM embedding failed, using fallback:', error.message);
+            logWithTimestamp('error', `LLM embedding failed, using fallback:`, error.message);
             return this._simpleTextEmbedding(text);
         }
     }
@@ -707,17 +778,17 @@ Examples:
      */
     async _initializeEmbeddingClient() {
         try {
-            console.log('[QuestionDetectionService] Initializing embedding client...');
+            logWithTimestamp('log', `Initializing embedding client...`);
             
             // Get current LLM configuration
             const modelInfo = await modelStateService.getCurrentModelInfo('llm');
             
             if (!modelInfo || !modelInfo.apiKey) {
-                console.warn('[QuestionDetectionService] No LLM configuration found for embeddings');
+                logWithTimestamp('warn', `No LLM configuration found for embeddings`);
                 return;
             }
             
-            console.log(`[QuestionDetectionService] Using provider: ${modelInfo.provider} for embeddings`);
+            logWithTimestamp('log', `Using provider: ${modelInfo.provider} for embeddings`);
             
             // Create embedding client (currently OpenAI and Gemini supported)
             if (modelInfo.provider === 'openai' || modelInfo.provider === 'openai-glass') {
@@ -726,9 +797,9 @@ Examples:
                     model: this.embeddingModel
                 });
                 // OpenAI embeddings typically have higher similarity scores
-                this.confidence_threshold_high = 0.85;
-                this.confidence_threshold_low = 0.70;
-                console.log('[QuestionDetectionService] OpenAI embedding client initialized');
+                this.confidence_threshold_high = 0.75;
+                this.confidence_threshold_low = 0.55;
+                logWithTimestamp('log', `OpenAI embedding client initialized`);
             } else if (modelInfo.provider === 'gemini') {
                 this.embeddingClient = createEmbedding(modelInfo.provider, {
                     apiKey: modelInfo.apiKey,
@@ -737,13 +808,13 @@ Examples:
                 // Gemini embeddings may have different similarity ranges
                 this.confidence_threshold_high = 0.80;
                 this.confidence_threshold_low = 0.65;
-                console.log('[QuestionDetectionService] Gemini embedding client initialized');
+                logWithTimestamp('log', `Gemini embedding client initialized`);
             } else {
-                console.warn(`[QuestionDetectionService] Embeddings not supported for provider: ${modelInfo.provider}`);
+                logWithTimestamp('warn', `Embeddings not supported for provider: ${modelInfo.provider}`);
             }
             
         } catch (error) {
-            console.error('[QuestionDetectionService] Failed to initialize embedding client:', error);
+            logWithTimestamp('error', `Failed to initialize embedding client:`, error);
             this.embeddingClient = null;
         }
     }
@@ -756,7 +827,7 @@ Examples:
     _simpleTextEmbedding(text) {
         // Safety check for undefined or null text
         if (!text || typeof text !== 'string') {
-            console.warn('[QuestionDetectionService] Invalid text for embedding:', text);
+            logWithTimestamp('warn', `Invalid text for embedding:`, text);
             return new Array(100).fill(0);
         }
         
@@ -794,7 +865,7 @@ Examples:
      */
     _cosineSimilarity(vecA, vecB) {
         if (vecA.length !== vecB.length) {
-            console.warn('[QuestionDetectionService] Vector length mismatch');
+            logWithTimestamp('warn', `Vector length mismatch`);
             return 0;
         }
 
@@ -824,7 +895,7 @@ Examples:
 
         const questionData = this.questionBank.get(questionId);
         if (!questionData) {
-            console.warn('[QuestionDetectionService] Manual override: Question not found:', questionId);
+            logWithTimestamp('warn', `Manual override: Question not found:`, questionId);
             return;
         }
 
@@ -837,7 +908,7 @@ Examples:
             text: questionData.question.text
         };
 
-        console.log('[QuestionDetectionService] Manual override triggered:', event);
+        logWithTimestamp('log', `Manual override triggered:`, event);
         this.emit('question-detected', event);
     }
 

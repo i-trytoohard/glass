@@ -493,11 +493,25 @@ class LocalAIManager extends EventEmitter {
      */
     async updateServiceState(serviceName) {
         try {
-            const status = await this.getServiceStatus(serviceName);
-            this.state[serviceName] = status;
+            const newStatus = await this.getServiceStatus(serviceName);
+            const oldStatus = this.state[serviceName];
             
-            // 상태 변경 이벤트 발행
-            this.emit('state-changed', serviceName, status);
+            // Only emit event if state actually changed
+            const statusChanged = !oldStatus || 
+                oldStatus.installed !== newStatus.installed ||
+                oldStatus.running !== newStatus.running ||
+                JSON.stringify(oldStatus.models) !== JSON.stringify(newStatus.models);
+            
+            this.state[serviceName] = newStatus;
+            
+            if (statusChanged) {
+                console.log(`[LocalAIManager] ${serviceName} state changed:`, {
+                    installed: newStatus.installed,
+                    running: newStatus.running,
+                    models: newStatus.models?.length || 0
+                });
+                this.emit('state-changed', serviceName, newStatus);
+            }
         } catch (error) {
             console.error(`[LocalAIManager] Failed to update ${serviceName} state:`, error);
         }
@@ -532,12 +546,15 @@ class LocalAIManager extends EventEmitter {
         }
         
         this.syncInterval = setInterval(async () => {
+            // Only check non-ollama services here since ollama has its own optimized sync
             for (const serviceName of Object.keys(this.services)) {
-                await this.updateServiceState(serviceName);
+                if (serviceName !== 'ollama') {
+                    await this.updateServiceState(serviceName);
+                }
             }
         }, interval);
         
-        // 각 서비스의 주기적 동기화도 시작
+        // Ollama service handles its own optimized periodic sync
         ollamaService.startPeriodicSync();
     }
     

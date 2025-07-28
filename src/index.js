@@ -38,6 +38,10 @@ let isShuttingDown = false; // Flag to prevent infinite shutdown loop
 global.modelStateService = modelStateService;
 //////// after_modelStateService ////////
 
+// Import and expose ResearchService globally  
+const researchService = require('./features/research/researchService');
+global.researchService = researchService;
+
 // Import and initialize OllamaService
 const ollamaService = require('./features/common/services/ollamaService');
 const ollamaModelRepository = require('./features/common/repositories/ollamaModel');

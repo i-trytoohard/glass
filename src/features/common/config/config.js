@@ -34,15 +34,15 @@ class Config {
             // Audio Processing Configuration
             audio: {
                 sampleRate: 24000,
-                chunkDuration: 0.1,        // seconds (100ms)
+                chunkDuration: 0.08,       // Reduced from 0.1s (100ms) to 80ms for faster processing
                 bufferSize: 2048,          // samples
                 enableLogging: true,       // can be overridden by GLASS_AUDIO_LOGGING env var
                 format: 'pcm16',
                 channels: 1,
                 
                 // Timing controls
-                minChunkInterval: 90,      // minimum ms between chunks
-                maxChunkInterval: 110      // maximum ms between chunks (for validation)
+                minChunkInterval: 70,      // Reduced from 90ms for faster chunk processing
+                maxChunkInterval: 90       // Reduced from 110ms to match faster timing
             }
         };
         

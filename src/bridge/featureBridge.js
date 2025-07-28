@@ -151,6 +151,13 @@ module.exports = {
     ipcMain.handle('research:delete-question', async (event, questionId) => await researchService.deleteQuestion(questionId));
     
     ipcMain.handle('research:start-session', async (event, { studyId, participantData }) => await researchService.startResearchSession(studyId, participantData));
+    
+    // Debug ping handler to confirm frontend is loaded
+    ipcMain.handle('research:ping', async (event, message) => {
+      console.log('[FeatureBridge] 🎯 Frontend ping received:', message);
+      return 'pong';
+    });
+    
     ipcMain.handle('research:end-session', async () => {
       try {
         console.log('[FeatureBridge] Ending research session');
@@ -336,8 +343,8 @@ module.exports = {
       });
     });
 
-    // 주기적 상태 동기화 시작
-    localAIManager.startPeriodicSync();
+    // 주기적 상태 동기화 시작 (2분마다 - 덜 공격적)
+    localAIManager.startPeriodicSync(120000);
 
     // ResearchService 이벤트를 모든 윈도우에 브로드캐스트
     researchService.on('session-started', (data) => {

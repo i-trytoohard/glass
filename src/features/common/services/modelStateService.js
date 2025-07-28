@@ -102,7 +102,7 @@ class ModelStateService extends EventEmitter {
     }
 
     async handleLocalAIStateChange(service, state) {
-        console.log(`[ModelStateService] LocalAI state changed: ${service}`, state);
+        console.log(`[ModelStateService] ${service} state: ${state.installed ? '✅' : '❌'} installed, ${state.running ? '🟢' : '🔴'} running`);
         if (!state.installed || !state.running) {
             const types = service === 'ollama' ? ['llm'] : service === 'whisper' ? ['stt'] : [];
             await this._autoSelectAvailableModels(types);
@@ -133,6 +133,17 @@ class ModelStateService extends EventEmitter {
         const types = ['llm', 'stt'];
 
         for (const type of types) {
+            // SAFEGUARD: Don't auto-select STT models during active research sessions
+            // This prevents breaking ongoing audio capture mid-conversation
+            if (type === 'stt' && global.researchService) {
+                const isResearchActive = global.researchService.isSessionActive();
+                if (isResearchActive) {
+                    const sessionInfo = global.researchService.getCurrentSessionInfo();
+                    console.log(`[ModelStateService] Skipping STT auto-selection - research session is active:`, sessionInfo);
+                    continue; // Skip STT auto-selection
+                }
+            }
+            
             const currentModelId = selectedModels[type];
             let isCurrentModelValid = false;
             const forceReselection = forceReselectionForTypes.includes(type);

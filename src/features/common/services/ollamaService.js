@@ -935,7 +935,7 @@ class OllamaService extends EventEmitter {
         
         this._syncInterval = setInterval(() => {
             this.syncState();
-        }, 30000); // 30초마다
+        }, 120000); // 2분마다 (더 효율적)
     }
 
     stopPeriodicSync() {

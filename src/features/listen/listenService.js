@@ -105,8 +105,14 @@ class ListenService {
         // Save to database
         await this.saveConversationTurn(speaker, text);
         
-        // Add to summary service for analysis
-        this.summaryService.addConversationTurn(speaker, text);
+        // Only add to summary service if NOT in research mode
+        // During research, we want focused analysis, not general summary
+        if (researchService.isSessionActive()) {
+            console.log(`[ListenService] Research session active - skipping summary service`);
+        } else {
+            console.log(`[ListenService] Adding to summary service for analysis`);
+            this.summaryService.addConversationTurn(speaker, text);
+        }
         
         // Send to research service for question tracking (if research session is active)
         try {

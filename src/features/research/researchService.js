@@ -19,10 +19,14 @@ function tsSec() {
     return Math.floor(Date.now() / 1000); 
 }
 
-function concatClean(a, b) {
-    if (!a) return b;
-    if (!b) return a;
-    return (a + ' ' + b).trim();
+// Utility function to create formatted timestamps for logs
+function timestamp() {
+    return new Date().toISOString().substr(11, 12); // HH:MM:SS.mmm format
+}
+
+// Utility function for timestamped logging
+function logWithTimestamp(level = 'log', ...args) {
+    console[level](`${timestamp()} [ResearchService]`, ...args);
 }
 
 class ResearchService extends EventEmitter {
@@ -44,7 +48,7 @@ class ResearchService extends EventEmitter {
         this.questionResponses = new Map(); // questionId -> response data
         this.transcriptBuffer = []; // Recent transcript segments for analysis
         this.lastAnalysisTime = 0;
-        this.analysisInterval = 400; // Minimum 400ms between analyses for more real-time feel
+        this.analysisInterval = 100; // Reduced from 150ms to 100ms for even faster insight updates
         this.isLiveAnalysisActive = false;
         this.currentQuestionBeingAsked = null; // Track which question is currently being asked
         this.currentAnswerBeingGiven = ''; // Track the current answer being provided
@@ -60,7 +64,7 @@ class ResearchService extends EventEmitter {
             responses: []
         };
         this.lastFollowUpUpdateTime = 0; // Track when follow-ups were last updated
-        this.followUpUpdateInterval = 3000; // Minimum 3 seconds between follow-up updates for faster response
+        this.followUpUpdateInterval = 1500; // Reduced from 2000ms for even faster follow-up updates
         this._listenService = null; // Lazy-loaded to avoid circular dependency
         
         // Interviewer-driven question activation
@@ -75,7 +79,7 @@ class ResearchService extends EventEmitter {
             currentTurnBuffer: '',
             currentTurnStartTime: null,
             turnCompletionTimeout: null,
-            turnCompletionDelay: 1200, // 1.2 seconds of silence for faster turn completion detection
+            turnCompletionDelay: 800, // Reduced from 1200ms for much faster turn detection
             interviewerTurnHistory: [] // Keep last few complete interviewer turns
         };
         
@@ -88,7 +92,7 @@ class ResearchService extends EventEmitter {
             followUpsShown: 0
         };
         
-        console.log('[ResearchService] Service initialized with speech completion detection');
+        logWithTimestamp('log', 'Service initialized with speech completion detection');
     }
 
     // Lazy load listen service to avoid circular dependency
@@ -104,7 +108,7 @@ class ResearchService extends EventEmitter {
      */
     setupQuestionDetectionEvents() {
         this.questionDetectionService.on('question-detected', (data) => {
-            console.log('[ResearchService] Question detected:', data);
+            logWithTimestamp('log', 'Question detected:', data);
             this._handleQuestionDetected(data);
             
             // Forward to all listeners (UI, etc.)
@@ -112,12 +116,12 @@ class ResearchService extends EventEmitter {
         });
 
         this.questionDetectionService.on('detection-started', (data) => {
-            console.log('[ResearchService] Question detection started:', data);
+            logWithTimestamp('log', 'Question detection started:', data);
             this.emit('detection-started', data);
         });
 
         this.questionDetectionService.on('detection-stopped', () => {
-            console.log('[ResearchService] Question detection stopped');
+            logWithTimestamp('log', 'Question detection stopped');
             this.emit('detection-stopped');
         });
     }
@@ -129,7 +133,7 @@ class ResearchService extends EventEmitter {
     _handleQuestionDetected(detectionData) {
         const { type, questionId, text, score, confidence } = detectionData;
 
-        console.log('[ResearchService] Processing detected question:', {
+        logWithTimestamp('log', 'Processing detected question:', {
             type, questionId, text, score, confidence
         });
 
@@ -138,25 +142,22 @@ class ResearchService extends EventEmitter {
                 if (questionId && this.activeQuestions.has(questionId)) {
                     // Mark question as in progress
                     this.questionStatus.set(questionId, 'in_progress');
-                    console.log(`[ResearchService] Marked scripted question ${questionId} as in_progress`);
+                    logWithTimestamp('log', ` Marked scripted question ${questionId} as in_progress`);
                     
-                    // Emit current question change
-                    this.emit('current-question-changed', {
-                        questionId,
-                        question: this.activeQuestions.get(questionId),
-                        detectionData
-                    });
+                    // REMOVED: current-question-changed emit - this was causing UI to overwrite analysis-update data
+                    // The analysis-update event now provides all current question data (answer + insights)
+                    // this.emit('current-question-changed', { questionId, question: this.activeQuestions.get(questionId), detectionData });
                 }
                 break;
 
             case 'ambiguous':
-                console.log(`[ResearchService] Ambiguous question detected (score: ${score})`);
+                logWithTimestamp('log', ` Ambiguous question detected (score: ${score})`);
                 // Could emit to UI for manual clarification
                 this.emit('ambiguous-question-detected', detectionData);
                 break;
 
             case 'off_script':
-                console.log(`[ResearchService] Off-script question detected: "${text}"`);
+                logWithTimestamp('log', ` Off-script question detected: "${text}"`);
                 // Track off-script questions for analysis
                 this.emit('off-script-question-detected', detectionData);
                 break;
@@ -197,7 +198,7 @@ class ResearchService extends EventEmitter {
     // ==================== STUDY MANAGEMENT ====================
     
     async createStudy(studyData) {
-        console.log('[ResearchService] createStudy called with data:', studyData);
+        logWithTimestamp('log', 'createStudy called with data:', studyData);
         const studyId = crypto.randomUUID();
         const currentUser = authService.getCurrentUser();
         const uid = currentUser ? currentUser.uid : 'default_user';
@@ -217,9 +218,9 @@ class ResearchService extends EventEmitter {
             updated_at: Math.floor(Date.now() / 1000)
         };
         
-        console.log('[ResearchService] About to create study:', study);
+        logWithTimestamp('log', 'About to create study:', study);
         await researchStudyRepository.create(study);
-        console.log(`[ResearchService] Created study: ${studyId}`);
+        logWithTimestamp('log', ` Created study: ${studyId}`);
         return study;
     }
 
@@ -277,7 +278,7 @@ class ResearchService extends EventEmitter {
             this.activeQuestions.clear();
         }
         
-        console.log(`[ResearchService] Deleted study: ${studyId}`);
+        logWithTimestamp('log', ` Deleted study: ${studyId}`);
     }
 
     // ==================== QUESTION MANAGEMENT ====================
@@ -298,7 +299,7 @@ class ResearchService extends EventEmitter {
         };
         
         await researchQuestionRepository.create(question);
-        console.log(`[ResearchService] Added question to study ${studyId}: ${questionId}`);
+        logWithTimestamp('log', ` Added question to study ${studyId}: ${questionId}`);
         return question;
     }
 
@@ -330,25 +331,25 @@ class ResearchService extends EventEmitter {
     // ==================== RESEARCH SESSION MANAGEMENT ====================
     
     async startResearchSession(studyId, participantData = {}) {
-        console.log('[ResearchService] Starting research session with studyId:', studyId);
+        logWithTimestamp('log', 'Starting research session with studyId:', studyId);
         
         // Get or create a regular session
         const sessionId = await sessionRepository.getOrCreateActive('research');
         await sessionRepository.updateType(sessionId, 'research');
-        console.log('[ResearchService] Session created/retrieved:', sessionId);
+        logWithTimestamp('log', 'Session created/retrieved:', sessionId);
         
         // Load study from local repository first, fallback to database
         let study = localStudiesRepository.getStudyById(studyId);
-        console.log('[ResearchService] Local study lookup result:', {
+        logWithTimestamp('log', 'Local study lookup result:', {
             found: !!study,
             studyId: studyId,
             studyTitle: study?.title || 'Not found'
         });
         
         if (study) {
-            console.log('[ResearchService] Using local study:', study.title);
+            logWithTimestamp('log', 'Using local study:', study.title);
             this.currentStudy = study;
-            console.log('[ResearchService] Set currentStudy:', {
+            logWithTimestamp('log', 'Set currentStudy:', {
                 id: this.currentStudy.id,
                 title: this.currentStudy.title,
                 hasQuestions: !!this.currentStudy.questions,
@@ -357,7 +358,7 @@ class ResearchService extends EventEmitter {
             
             // Load questions from local study
             const questions = localStudiesRepository.getStudyQuestions(studyId);
-            console.log('[ResearchService] Loaded questions from local study:', questions.length);
+            logWithTimestamp('log', 'Loaded questions from local study:', questions.length);
             
             this.activeQuestions.clear();
             this.questionResponses.clear();
@@ -383,14 +384,14 @@ class ResearchService extends EventEmitter {
             });
         } else {
             // Fallback to database study (existing logic)
-            console.log('[ResearchService] Using database study');
+            logWithTimestamp('log', 'Using database study');
             this.currentStudy = await this.getStudy(studyId);
             if (!this.currentStudy) {
                 throw new Error(`Study not found: ${studyId}`);
             }
             
             const questions = await this.getStudyQuestions(studyId);
-            console.log('[ResearchService] Loaded questions from database study:', questions.length);
+            logWithTimestamp('log', 'Loaded questions from database study:', questions.length);
             this.activeQuestions.clear();
             this.questionResponses.clear();
             
@@ -430,7 +431,7 @@ class ResearchService extends EventEmitter {
         };
         
         await researchSessionRepository.create(this.currentSession);
-        console.log('[ResearchService] Research session record created:', this.currentSession.session_id);
+        logWithTimestamp('log', 'Research session record created:', this.currentSession.session_id);
         
         // Start live analysis
         this.isLiveAnalysisActive = true;
@@ -450,63 +451,63 @@ class ResearchService extends EventEmitter {
         
         // Start listen service to capture audio for analysis
         try {
-            console.log('[ResearchService] Starting listen service for audio capture...');
+            logWithTimestamp('log', 'Starting listen service for audio capture...');
             const listenService = this._getListenService();
             await listenService.handleListenRequest('Listen');
-            console.log('[ResearchService] Listen service started successfully');
+            logWithTimestamp('log', 'Listen service started successfully');
             
             // Ensure research window is visible for microphone capture
-            console.log('[ResearchService] Making research window visible for microphone capture...');
+            logWithTimestamp('log', 'Making research window visible for microphone capture...');
             internalBridge.emit('window:requestVisibility', { name: 'research', visible: true });
             
             // Use proper window positioning via WindowManager instead of forcing bounds
             try {
-                console.log('[ResearchService] Ensuring research window uses proper layout positioning');
+            logWithTimestamp('log', 'Ensuring research window uses proper layout positioning');
                 // The window visibility request will handle proper positioning via WindowLayoutManager
                 // No need to force specific bounds - let the layout system handle it
             } catch (error) {
-                console.error('[ResearchService] Error with window positioning:', error);
+                logWithTimestamp('error', ' Error with window positioning:', error);
             }
             
             // Wait a moment for window to be ready, then start microphone capture
             setTimeout(() => {
-                console.log('[ResearchService] Triggering microphone capture start...');
+                logWithTimestamp('log', 'Triggering microphone capture start...');
                 listenService.sendToRenderer('change-listen-capture-state', { status: "start" });
-            }, 300); // Faster startup for more responsive feel
+            }, 100); // Reduced from 300ms for much faster startup
             
             // Also start audio capture
-            console.log('[ResearchService] Starting macOS audio capture...');
+            logWithTimestamp('log', 'Starting macOS audio capture...');
             await listenService.startMacOSAudioCapture();
-            console.log('[ResearchService] Audio capture started successfully');
+            logWithTimestamp('log', 'Audio capture started successfully');
         } catch (error) {
-            console.error('[ResearchService] Failed to start listen service or audio capture:', error);
+            logWithTimestamp('error', ' Failed to start listen service or audio capture:', error);
             // Don't fail the research session if listen service fails
         }
         
         // Start the session
-        console.log(`[ResearchService] Research session started for study: ${studyId}`);
+        logWithTimestamp('log', ` Research session started for study: ${studyId}`);
 
         // Start question detection with study questions
         if (this.currentStudy && this.currentStudy.questions) {
-            console.log('[ResearchService] Starting question detection with', this.currentStudy.questions.length, 'questions');
+            logWithTimestamp('log', 'Starting question detection with', this.currentStudy.questions.length, 'questions');
             try {
                 await this.questionDetectionService.startDetection(this.currentStudy.questions);
             } catch (error) {
-                console.error('[ResearchService] Failed to start question detection:', error);
+                logWithTimestamp('error', ' Failed to start question detection:', error);
                 // Continue without question detection if it fails
             }
         }
 
         // NEW: Start screen recording for research session
         try {
-            console.log('[ResearchService] Starting screen recording for research session...');
+            logWithTimestamp('log', 'Starting screen recording for research session...');
             const recordingResult = await screenRecordingService.startRecording(sessionId, {
                 videoBitsPerSecond: 2500000, // 2.5 Mbps for good quality
                 audioBitsPerSecond: 128000   // 128 kbps for system audio
             });
             
             if (recordingResult.success) {
-                console.log('[ResearchService] Screen recording started successfully:', recordingResult.recordingPath);
+                logWithTimestamp('log', 'Screen recording started successfully:', recordingResult.recordingPath);
                 
                 // Emit recording started event to UI
                 this.emit('screen-recording-started', {
@@ -523,11 +524,11 @@ class ResearchService extends EventEmitter {
                     }
                 });
             } else {
-                console.warn('[ResearchService] Failed to start screen recording:', recordingResult.error);
+                logWithTimestamp('warn', ' Failed to start screen recording:', recordingResult.error);
                 // Continue without screen recording if it fails
             }
         } catch (error) {
-            console.error('[ResearchService] Error starting screen recording:', error);
+            logWithTimestamp('error', ' Error starting screen recording:', error);
             // Continue without screen recording if it fails
         }
         
@@ -539,7 +540,7 @@ class ResearchService extends EventEmitter {
             study: this.currentStudy // Include the full study object
         };
         
-        console.log('[ResearchService] Emitting session-started event with data:', {
+        logWithTimestamp('log', 'Emitting session-started event with data:', {
             studyId: sessionData.studyId,
             sessionId: sessionData.sessionId,
             questionsCount: sessionData.questionsCount,
@@ -570,20 +571,6 @@ class ResearchService extends EventEmitter {
     }
 
 
-
-    /**
-     * Get completion percentage for the current session
-     * @returns {number} Percentage (0-100)
-     */
-    getCompletionPercentage() {
-        if (this.activeQuestions.size === 0) return 0;
-        
-        const completedCount = Array.from(this.questionStatus.entries())
-            .filter(([_, status]) => status === 'completed').length;
-        
-        return Math.round((completedCount / this.activeQuestions.size) * 100);
-    }
-
     async endResearchSession() {
         if (!this.currentSession) {
             return;
@@ -598,23 +585,23 @@ class ResearchService extends EventEmitter {
         
         // Stop listen service and audio capture
         try {
-            console.log('[ResearchService] Stopping audio capture and listen service...');
+            logWithTimestamp('log', 'Stopping audio capture and listen service...');
             const listenService = this._getListenService();
             await listenService.stopMacOSAudioCapture();
             await listenService.handleListenRequest('Stop');
             
             // Hide research window
-            console.log('[ResearchService] Hiding research window...');
+            logWithTimestamp('log', 'Hiding research window...');
             internalBridge.emit('window:requestVisibility', { name: 'research', visible: false });
             
-            console.log('[ResearchService] Audio capture and listen service stopped successfully');
+            logWithTimestamp('log', 'Audio capture and listen service stopped successfully');
         } catch (error) {
-            console.error('[ResearchService] Failed to stop listen service or audio capture:', error);
+            logWithTimestamp('error', ' Failed to stop listen service or audio capture:', error);
         }
         
         // NEW: Stop screen recording
         try {
-            console.log('[ResearchService] Stopping screen recording...');
+            logWithTimestamp('log', 'Stopping screen recording...');
             
             // Tell renderer to stop recording first
             internalBridge.emit('research:stopScreenRecording');
@@ -623,8 +610,8 @@ class ResearchService extends EventEmitter {
             const recordingResult = await screenRecordingService.stopRecording();
             
             if (recordingResult.success) {
-                console.log('[ResearchService] Screen recording stopped successfully');
-                console.log('[ResearchService] Recording saved to:', recordingResult.recordingPath);
+                logWithTimestamp('log', 'Screen recording stopped successfully');
+                logWithTimestamp('log', 'Recording saved to:', recordingResult.recordingPath);
                 
                 this.emit('screen-recording-stopped', {
                     sessionId: this.currentSession.session_id,
@@ -632,10 +619,10 @@ class ResearchService extends EventEmitter {
                     duration: recordingResult.duration
                 });
             } else {
-                console.warn('[ResearchService] Failed to stop screen recording:', recordingResult.error);
+                logWithTimestamp('warn', ' Failed to stop screen recording:', recordingResult.error);
             }
         } catch (error) {
-            console.error('[ResearchService] Error stopping screen recording:', error);
+            logWithTimestamp('error', ' Error stopping screen recording:', error);
         }
         
         // Save all responses
@@ -657,10 +644,15 @@ class ResearchService extends EventEmitter {
         // End the regular session
         await sessionRepository.end(this.currentSession.session_id);
         
-        console.log(`[ResearchService] Ended research session: ${this.currentSession.session_id}`);
+        logWithTimestamp('log', ` Ended research session: ${this.currentSession.session_id}`);
         
         // Dump session metrics
         this._dumpSessionMetrics();
+        
+        // Stop question detection and clean up its state
+        if (this.questionDetectionService) {
+            this.questionDetectionService.stopDetection();
+        }
         
         // Reset state
         this.currentStudy = null;
@@ -680,7 +672,7 @@ class ResearchService extends EventEmitter {
         }
 
         try {
-            console.log('[ResearchService] Pausing research session...');
+            logWithTimestamp('log', 'Pausing research session...');
             
             // Stop audio capture but keep session data
             const listenService = this._getListenService();
@@ -695,11 +687,11 @@ class ResearchService extends EventEmitter {
                 research_mode: 'paused'
             });
             
-            console.log('[ResearchService] Research session paused successfully');
+            logWithTimestamp('log', 'Research session paused successfully');
             this.emit('session-paused');
             
         } catch (error) {
-            console.error('[ResearchService] Failed to pause research session:', error);
+            logWithTimestamp('error', ' Failed to pause research session:', error);
             throw error;
         }
     }
@@ -710,7 +702,7 @@ class ResearchService extends EventEmitter {
         }
 
         try {
-            console.log('[ResearchService] Resuming research session...');
+            logWithTimestamp('log', 'Resuming research session...');
             
             // Restart audio capture
             const listenService = this._getListenService();
@@ -726,11 +718,11 @@ class ResearchService extends EventEmitter {
                 research_mode: 'live'
             });
             
-            console.log('[ResearchService] Research session resumed successfully');
+            logWithTimestamp('log', 'Research session resumed successfully');
             this.emit('session-resumed');
             
         } catch (error) {
-            console.error('[ResearchService] Failed to resume research session:', error);
+            logWithTimestamp('error', ' Failed to resume research session:', error);
             throw error;
         }
     }
@@ -739,20 +731,18 @@ class ResearchService extends EventEmitter {
     
     async processTranscriptSegment(speaker, text, timestamp) {
         if (!this.isLiveAnalysisActive || !this.currentStudy) {
-            console.log('[ResearchService] 🔍 DEBUG: Skipping transcript - analysis not active or no study');
+            logWithTimestamp('log', '🔍 DEBUG: Skipping transcript - analysis not active or no study');
             return;
         }
         
-        console.log(`[ResearchService] Processing transcript: ${speaker} - "${text.substring(0, 50)}..."`);
+        logWithTimestamp('log', ` Processing transcript: ${speaker} - "${text.substring(0, 50)}..."`);
         
         // NEW: Implement speech completion detection
         await this._handleSpeechTurn(speaker, text, timestamp);
         
-        // Still forward to question detection service for compatibility
-        if (this.questionDetectionService.isActive) {
-            console.log('[ResearchService] Forwarding to question detection service:', { text: text.substring(0, 50), speaker });
-            await this.questionDetectionService.processTranscript(text, speaker === 'Me' ? 'moderator' : 'participant');
-        }
+        // REMOVED: Duplicate forwarding to question detection
+        // Question detection is already handled by processTranscript() method
+        // called from sttService and featureBridge - no need to forward again here
         
         // Add to transcript buffer (for AI analysis)
         this.transcriptBuffer.push({
@@ -775,21 +765,19 @@ class ResearchService extends EventEmitter {
      * Only process complete speaker turns, not partial segments
      */
     async _handleSpeechTurn(speaker, text, timestamp) {
-        const turnManager = this.speakerTurnManager;
-        
         // CRITICAL: Only process microphone audio ("Me") for QUESTION DETECTION
         // System audio ("Them") contains participant responses + background noise
         const isMicrophoneAudio = speaker === 'Me';
         const isSystemAudio = speaker === 'Them';
         
         if (isMicrophoneAudio) {
-            console.log(`[ResearchService] 🎤 Processing microphone audio for question detection: "${text.substring(0, 50)}..."`);
+            logWithTimestamp('log', ` 🎤 Processing microphone audio for question detection: "${text.substring(0, 50)}..."`);
             await this._handleInterviewerSpeechTurn(speaker, text, timestamp);
         } else if (isSystemAudio) {
-            console.log(`[ResearchService] 🔊 Processing system audio for participant responses: "${text.substring(0, 50)}..."`);
+            logWithTimestamp('log', ` 🔊 Processing system audio for participant responses: "${text.substring(0, 50)}..."`);
             await this._handleParticipantSpeechTurn(speaker, text, timestamp);
         } else {
-            console.log(`[ResearchService] ⚠️ Unknown speaker: ${speaker} - "${text.substring(0, 50)}..."`);
+            logWithTimestamp('log', ` ⚠️ Unknown speaker: ${speaker} - "${text.substring(0, 50)}..."`);
         }
     }
 
@@ -804,14 +792,14 @@ class ResearchService extends EventEmitter {
         
         if (wasSystemAudio || !turnManager.currentSpeaker) {
             if (wasSystemAudio) {
-                console.log(`[ResearchService] 🎤 Interviewer resuming after system audio`);
+                logWithTimestamp('log', ` 🎤 Interviewer resuming after system audio`);
             }
             
             // Reset for new interviewer turn
             this._resetTurnState();
             turnManager.currentSpeaker = speaker;
             turnManager.currentTurnStartTime = timestamp;
-            console.log(`[ResearchService] 🎤 Starting new interviewer turn`);
+            logWithTimestamp('log', ` 🎤 Starting new interviewer turn`);
         }
         
         // Accumulate text for current interviewer turn
@@ -826,7 +814,7 @@ class ResearchService extends EventEmitter {
         
         // Set timeout to detect interviewer turn completion (silence)
         turnManager.turnCompletionTimeout = setTimeout(async () => {
-            console.log(`[ResearchService] 🎤 Interviewer turn completed after ${turnManager.turnCompletionDelay}ms silence`);
+            logWithTimestamp('log', ` 🎤 Interviewer turn completed after ${turnManager.turnCompletionDelay}ms silence`);
             
             await this._processCompleteInterviewerTurn(
                 turnManager.currentTurnBuffer,
@@ -837,7 +825,7 @@ class ResearchService extends EventEmitter {
             this._resetTurnState();
         }, turnManager.turnCompletionDelay);
         
-        console.log(`[ResearchService] 🎤 Interviewer turn accumulated: "${turnManager.currentTurnBuffer.substring(0, 80)}..."`);
+        logWithTimestamp('log', ` 🎤 Interviewer turn accumulated: "${turnManager.currentTurnBuffer.substring(0, 80)}..."`);
     }
 
     /**
@@ -846,7 +834,7 @@ class ResearchService extends EventEmitter {
     async _handleParticipantSpeechTurn(speaker, text, timestamp) {
         // System audio is processed immediately as complete participant responses
         // (no turn accumulation needed since it's already post-processed)
-        console.log(`[ResearchService] 🔊 Processing immediate participant response: "${text.substring(0, 80)}..."`);
+        logWithTimestamp('log', ` 🔊 Processing immediate participant response: "${text.substring(0, 80)}..."`);
         
         this.metrics.participantTurns++;
         
@@ -861,17 +849,24 @@ class ResearchService extends EventEmitter {
                 this.currentAnswerBeingGiven = '...' + this.currentAnswerBeingGiven.slice(-1000);
             }
             
-            console.log(`[ResearchService] 📝 Participant response added to active question ${this.currentQuestionBeingAsked.substring(0, 8)}: "${text.substring(0, 100)}..."`);
+            logWithTimestamp('log', ` 📝 Participant response added to active question ${this.currentQuestionBeingAsked.substring(0, 8)}: "${text.substring(0, 100)}..."`);
         } else {
-            console.log(`[ResearchService] 🔊 Participant speaking but no active question: "${text.substring(0, 50)}..."`);
+            logWithTimestamp('log', ` 🔊 Participant speaking but no active question: "${text.substring(0, 50)}..."`);
         }
         
-        // Trigger AI analysis for participant responses
+        // Only trigger AI analysis if there's an active current question
+        // Don't try to map free-form participant responses to study questions
+        if (!this.currentQuestionBeingAsked) {
+            logWithTimestamp('log', ` ⚠️ Skipping AI analysis - no active question to analyze response for`);
+            return;
+        }
+        
+        // Trigger AI analysis for participant responses to the current question
         const now = Date.now();
         const timeSinceLastAnalysis = now - this.lastAnalysisTime;
         
         if (timeSinceLastAnalysis >= this.analysisInterval && !this.pendingAnalysis) {
-            console.log('[ResearchService] Triggering AI analysis for participant response...');
+            logWithTimestamp('log', ` Triggering AI analysis for current question: ${this.currentQuestionBeingAsked.substring(0, 8)}`);
             await this.analyzeRecentTranscript();
             this.lastAnalysisTime = now;
         }
@@ -885,13 +880,13 @@ class ResearchService extends EventEmitter {
         // Participant responses are handled immediately in _handleParticipantSpeechTurn
         
         if (!completeTurnText || completeTurnText.trim().length === 0) {
-            console.log('[ResearchService] Skipping empty turn');
+            logWithTimestamp('log', 'Skipping empty turn');
             return;
         }
         
         const trimmedText = completeTurnText.trim();
-        console.log(`[ResearchService] 🎯 Processing COMPLETE turn: ${speaker} - "${trimmedText.substring(0, 100)}..."`);
-        console.log(`[ResearchService] Turn duration: ${endTime - startTime}ms`);
+        logWithTimestamp('log', ` 🎯 Processing COMPLETE turn: ${speaker} - "${trimmedText.substring(0, 100)}..."`);
+        logWithTimestamp('log', ` Turn duration: ${endTime - startTime}ms`);
     }
 
     /**
@@ -900,6 +895,13 @@ class ResearchService extends EventEmitter {
      */
     async _processCompleteInterviewerTurn(completeTurnText, startTime, endTime) {
         this.metrics.interviewerTurns++;
+        
+        // NEW: Process complete turn with question detection service for better refinement
+        // This provides the full interviewer turn context instead of just fragments
+        if (this.questionDetectionService.isActive) {
+            logWithTimestamp('log', ` 🔍 Sending complete interviewer turn to question detection for refinement`);
+            await this.questionDetectionService.processCompleteInterviewerTurn(completeTurnText);
+        }
         
         // Store in interviewer turn history
         this.speakerTurnManager.interviewerTurnHistory.push({
@@ -917,7 +919,7 @@ class ResearchService extends EventEmitter {
         
         // Only process if this looks like a question
         if (this.hasQuestionPattern(completeTurnText)) {
-            console.log(`[ResearchService] ✅ Complete interviewer question detected from microphone: "${completeTurnText.substring(0, 100)}..."`);
+            logWithTimestamp('log', ` ✅ Complete interviewer question detected from microphone: "${completeTurnText.substring(0, 100)}..."`);
             
             // Classify complete turn to study question
             const classification = await this.classifyInterviewerTurnToQuestion(completeTurnText);
@@ -930,12 +932,12 @@ class ResearchService extends EventEmitter {
                     completeTurnText
                 );
                 
-                console.log(`[ResearchService] 🎯 Question activated from microphone audio: ${classification.questionId.substring(0, 8)}`);
+                logWithTimestamp('log', ` 🎯 Question activated from microphone audio: ${classification.questionId.substring(0, 8)}`);
             } else {
-                console.log(`[ResearchService] Complete microphone question but no study question match (off-script)`);
+                logWithTimestamp('log', ` Complete microphone question but no study question match (off-script)`);
             }
         } else {
-            console.log(`[ResearchService] Complete microphone turn but no question pattern detected: "${completeTurnText.substring(0, 50)}..."`);
+            logWithTimestamp('log', ` Complete microphone turn but no question pattern detected: "${completeTurnText.substring(0, 50)}..."`);
         }
     }
 
@@ -956,15 +958,15 @@ class ResearchService extends EventEmitter {
         turnManager.currentTurnBuffer = '';
         turnManager.currentTurnStartTime = null;
         
-        console.log('[ResearchService] 🔄 Turn state reset');
+        logWithTimestamp('log', '🔄 Turn state reset');
     }
 
     async analyzeRecentTranscript() {
         const unprocessedSegments = this.transcriptBuffer.filter(seg => !seg.processed);
-        console.log(`[ResearchService] Analyzing ${unprocessedSegments.length} unprocessed transcript segments`);
+        logWithTimestamp('log', ` Analyzing ${unprocessedSegments.length} unprocessed transcript segments`);
         
         if (unprocessedSegments.length === 0) {
-            console.log('[ResearchService] No unprocessed segments to analyze');
+            logWithTimestamp('log', 'No unprocessed segments to analyze');
             return;
         }
         
@@ -974,29 +976,38 @@ class ResearchService extends EventEmitter {
                 .map(seg => `${seg.speaker}: ${seg.text}`)
                 .join('\n');
             
-            console.log(`[ResearchService] Transcript to analyze:\n${recentText}`);
+            logWithTimestamp('log', ` Transcript to analyze:\n${recentText}`);
             
-            // Prepare questions for analysis
-            const activeQuestionsList = Array.from(this.activeQuestions.values());
-            const questionContext = activeQuestionsList.map(q => ({
-                id: q.id,
-                text: q.question_text,
-                category: q.category,
-                status: this.questionResponses.get(q.id)?.status || 'not_asked'
-            }));
+            // Only analyze against the current active question, not all study questions
+            // This prevents AI from mapping responses to unrelated questions
+            if (!this.currentQuestionBeingAsked) {
+                logWithTimestamp('log', ` ⚠️ No current question - skipping AI analysis`);
+                return;
+            }
             
-            console.log(`[ResearchService] Analyzing against ${questionContext.length} questions`);
-            questionContext.forEach(q => {
-                console.log(`[ResearchService] Question ${q.id.substring(0, 8)}: "${q.text.substring(0, 60)}..." (status: ${q.status})`);
-            });
+            const currentQuestion = this.activeQuestions.get(this.currentQuestionBeingAsked);
+            if (!currentQuestion) {
+                logWithTimestamp('warn', ` Current question ${this.currentQuestionBeingAsked} not found in active questions`);
+                return;
+            }
             
-            // AI analysis
+            // Prepare only the current question for analysis
+            const questionContext = [{
+                id: currentQuestion.id,
+                text: currentQuestion.question_text,
+                category: currentQuestion.category,
+                status: this.questionResponses.get(currentQuestion.id)?.status || 'not_asked'
+            }];
+            
+            logWithTimestamp('log', ` Analyzing response against current question: ${currentQuestion.id.substring(0, 8)} - "${currentQuestion.question_text.substring(0, 60)}..." (status: ${questionContext[0].status})`);
+            
+            // AI analysis - focused only on the current question
             const analysis = await this.performQuestionAnalysis(recentText, questionContext);
-            console.log('[ResearchService] 🔍 DEBUG: AI analysis completed:', analysis);
-            console.log('[ResearchService] 🔍 DEBUG: AI suggestions received:', analysis.suggestions?.length || 0, 'suggestions');
+            logWithTimestamp('log', '🔍 DEBUG: AI analysis completed:', analysis);
+            logWithTimestamp('log', '🔍 DEBUG: AI suggestions received:', analysis.suggestions?.length || 0, 'suggestions');
             if (analysis.suggestions && analysis.suggestions.length > 0) {
                 analysis.suggestions.forEach((suggestion, index) => {
-                    console.log(`[ResearchService] 🔍 DEBUG: AI suggestion ${index + 1}: "${suggestion}"`);
+                    logWithTimestamp('log', ` 🔍 DEBUG: AI suggestion ${index + 1}: "${suggestion}"`);
                 });
             }
             
@@ -1004,7 +1015,17 @@ class ResearchService extends EventEmitter {
             if (analysis.question_updates) {
                 analysis.question_updates.forEach(update => {
                     const question = this.activeQuestions.get(update.questionId);
-                    console.log(`[ResearchService] AI update for question ${update.questionId.substring(0, 8)}: "${question?.question_text?.substring(0, 60)}..." -> status: ${update.status}, score: ${update.completeness_score}`);
+                    logWithTimestamp('log', ` AI update for question ${update.questionId.substring(0, 8)}: "${question?.question_text?.substring(0, 60)}..." -> status: ${update.status}, score: ${update.completeness_score}`);
+                    
+                    // Debug key_insights specifically
+                    if (update.key_insights) {
+                        logWithTimestamp('log', ` 🔍 AI key_insights for ${update.questionId.substring(0, 8)}:`, {
+                            type: typeof update.key_insights,
+                            isArray: Array.isArray(update.key_insights),
+                            length: update.key_insights?.length,
+                            value: update.key_insights
+                        });
+                    }
                 });
             }
             
@@ -1018,7 +1039,7 @@ class ResearchService extends EventEmitter {
             unprocessedSegments.forEach(seg => seg.processed = true);
             
             // Update follow-up questions with intelligent management
-            console.log(`[ResearchService] AI returned ${analysis.suggestions?.length || 0} suggestions`);
+            logWithTimestamp('log', ` AI returned ${analysis.suggestions?.length || 0} suggestions`);
             this.updateFollowUpQuestions(analysis.suggestions || []);
             
             // Emit updates
@@ -1030,10 +1051,10 @@ class ResearchService extends EventEmitter {
                 followUpMetrics: this.followUpQuestionMetrics
             });
             
-            console.log('[ResearchService] Analysis update emitted to UI');
+            logWithTimestamp('log', '📡 Analysis update emitted to UI - UI should refresh insights now');
             
         } catch (error) {
-            console.error('[ResearchService] Analysis error:', error);
+            logWithTimestamp('error', ' Analysis error:', error);
         }
     }
 
@@ -1049,25 +1070,42 @@ class ResearchService extends EventEmitter {
             { role: 'system', content: systemPrompt },
             { 
                 role: 'user', 
-                content: `Analyze this recent transcript segment and provide question tracking updates:
+                content: `Analyze this transcript and generate key insights quickly:
 
 TRANSCRIPT:
 ${transcriptText}
 
-Please respond with a JSON object containing:
-1. "question_updates": Array of {questionId, status, completeness_score, key_insights, follow_up_needed}
-2. "suggestions": Array of 1-2 specific follow-up questions that reference what the participant just said
-3. "overall_analysis": Brief summary of conversation progress
+Respond with JSON containing:
+1. "question_updates": [{questionId, status, completeness_score, key_insights, follow_up_needed}]
+2. "suggestions": [1-2 specific follow-up questions based on what was said]
+3. "overall_analysis": Brief summary
 
-Focus on generating contextual follow-ups that directly build on the participant's specific responses.`
+CRITICAL RULES FOR KEY INSIGHTS:
+- ONLY generate insights if participant provided meaningful, specific information
+- DO NOT create insights saying "no information provided", "participant didn't answer", etc.
+- Leave key_insights EMPTY [] if the response lacks substance
+- Focus on actual user behaviors, pain points, preferences, or experiences mentioned
+- Each insight should be actionable and specific to what was actually said
+
+EXAMPLES OF GOOD INSIGHTS:
+✅ "User prefers mobile banking for daily transactions due to convenience"
+✅ "Experiences frustration with multi-factor authentication when traveling"
+✅ "Uses 3 different apps because no single app meets all needs"
+
+EXAMPLES OF BAD INSIGHTS (DON'T GENERATE THESE):
+❌ "Participant did not provide clear information"
+❌ "No specific details were mentioned"
+❌ "Response was unclear or incomplete"
+
+If the participant gave a non-answer, unclear response, or just said a random word, return empty key_insights: []`
             }
         ];
         
         const llm = createLLM(modelInfo.provider, {
             apiKey: modelInfo.apiKey,
             model: modelInfo.model,
-            temperature: 0.3,
-            maxTokens: 1500
+            temperature: 0.4, // Slightly higher for faster, more creative insights
+            maxTokens: 800 // Reduced from 1500 for faster processing focused on insights
         });
         
         const completion = await llm.chat(messages);
@@ -1076,84 +1114,53 @@ Focus on generating contextual follow-ups that directly build on the participant
             // Robust JSON extraction - handle markdown fences, prose, etc.
             return this.extractJson(completion.content);
         } catch (parseError) {
-            console.error('[ResearchService] Failed to parse AI response:', parseError.message);
-            console.error('[ResearchService] Raw AI response:', completion.content);
+            logWithTimestamp('error', ' Failed to parse AI response:', parseError.message);
+            logWithTimestamp('error', ' Raw AI response:', completion.content);
             return { question_updates: [], suggestions: [], overall_analysis: '' };
         }
     }
 
     buildResearchAnalysisPrompt(questions) {
-        return `You are an expert UX research assistant analyzing live interview transcripts. Your goal is to track which research questions are being answered and suggest intelligent follow-ups.
+        return `You are a UX research assistant analyzing live interview transcripts. Generate insights quickly.
 
-RESEARCH CONTEXT:
-Study: ${this.currentStudy.title}
-Goals: ${this.currentStudy.goals}
-Methodology: ${this.currentStudy.methodology}
+STUDY: ${this.currentStudy.title}
+GOALS: ${this.currentStudy.goals}
 
 QUESTIONS TO TRACK:
-${questions.map(q => `- ${q.id}: [${q.category}] ${q.text} (Current status: ${q.status})`).join('\n')}
+${questions.map(q => `- ${q.id}: ${q.text} (${q.status})`).join('\n')}
 
-CRITICAL VALIDATION RULES:
-1. ONLY update a question's status if there is CLEAR EVIDENCE that:
-   - The interviewer actually asked a question related to the research question
-   - The participant provided a meaningful response (not just garbled text or fragments)
-   - The transcript is coherent and readable (not corrupted STT output)
+RULES:
+1. Use exact question IDs from above in questionId field
+2. Only update status for clear question-answer exchanges
+3. Generate 2-5 specific key insights per response
+4. Suggest specific follow-ups that reference participant's words
+5. Focus on user pain points, behaviors, motivations
 
-2. DO NOT update status for:
-   - Garbled or incoherent text (e.g., "current.txt Canara iscribe")
-   - Single words or fragments without context
-   - Text that appears to be STT transcription errors
-   - Cases where no clear question-answer exchange occurred
+STATUS: not_asked/partial/complete/needs_clarification
+COMPLETENESS: 0.0-1.0 (conservative scoring)
+INSIGHTS: Focus on actionable user research findings
 
-CRITICAL ID RULE: For each question above, I show id=(uuid). In your question_updates array, you MUST use that exact UUID string in the questionId field. Copy/paste exactly from the list above - do not shorten, truncate, or renumber. Any questionId that doesn't exactly match will be ignored.
-
-ANALYSIS GUIDELINES:
-1. Question Status Mapping (BE CONSERVATIVE):
-   - "not_asked": Question hasn't been addressed yet OR transcript is unclear/garbled
-   - "partial": Question clearly asked and participant gave a brief but coherent response
-   - "complete": Question clearly asked and adequately answered with sufficient detail
-   - "needs_clarification": Answer given but unclear or contradictory
-
-2. Completeness Scoring (0.0-1.0) - BE STRICT:
-   - Only give scores > 0.0 when you can clearly identify both a question being asked AND a coherent response
-   - 0.1-0.3: Question asked but response is very brief or vague (but still coherent)
-   - 0.4-0.6: Question asked and answered with some relevant details
-   - 0.7-0.9: Question asked and comprehensively answered
-   - NEVER score above 0.0 for garbled, incoherent, or fragmented text
-
-3. Transcript Quality Check:
-   - If the transcript appears garbled, corrupted, or nonsensical, do NOT update any question statuses
-   - Look for coherent sentence structure and logical conversation flow
-   - Reject updates for text like "current.txt Canara iscribe" or similar STT errors
-
-3. Follow-up Suggestions:
-   - ONLY suggest follow-ups when the participant's response is incomplete, vague, or needs clarification
-   - Do NOT suggest follow-ups if the conversation is flowing naturally or if questions are being adequately answered
-   - When you do suggest, make them SPECIFIC and reference exact details the participant mentioned
-   - Ask for concrete examples, specific situations, or deeper exploration of pain points they raised
-   - Use phrases like "You mentioned X..." or "When you said Y..." to show you're building on their words
-   - Focus on actionable details: "how does", "what happens when", "can you describe a specific time"
-   - Avoid generic suggestions like "tell me more" or "anything else" - be precise about what you need to know
-
-4. Key Insights:
-   - Extract actionable insights about user behavior, pain points, motivations
-   - Note emotional responses and non-verbal cues mentioned
-   - Identify patterns or themes emerging
-
-RESPONSE FORMAT: Valid JSON only, no additional text.`;
+Return valid JSON only.`;
     }
 
     async updateQuestionResponses(analysis, transcriptSegments) {
         if (!analysis.question_updates) return;
         
-        console.log(`[ResearchService] Applying ${analysis.question_updates.length} question updates with monotonic enforcement`);
+        logWithTimestamp('log', ` Applying ${analysis.question_updates.length} question updates with monotonic enforcement`);
         
         for (const update of analysis.question_updates) {
             const questionId = update.questionId;
             
             // P0 Fix: Validate questionId exists in our active questions
             if (!this.activeQuestions.has(questionId)) {
-                console.warn(`[ResearchService] AI returned invalid questionId: "${questionId}" - skipping update`);
+                logWithTimestamp('warn', ` AI returned invalid questionId: "${questionId}" - skipping update`);
+                continue;
+            }
+            
+            // NEW: Only allow updates to the current active question
+            // This prevents AI from updating unrelated study questions
+            if (this.currentQuestionBeingAsked && questionId !== this.currentQuestionBeingAsked) {
+                logWithTimestamp('warn', ` AI tried to update question ${questionId.substring(0, 8)} but current question is ${this.currentQuestionBeingAsked.substring(0, 8)} - skipping update`);
                 continue;
             }
             
@@ -1182,15 +1189,15 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
     }
 
     async updateCurrentQuestionTracking(analysis, transcriptSegments) {
-        console.log(`[ResearchService] === AI ANALYSIS TRACKING ===`);
-        console.log(`[ResearchService] Current question: ${this.currentQuestionBeingAsked?.substring(0, 8)}...`);
-        console.log(`[ResearchService] Analysis question_updates:`, analysis.question_updates);
+        logWithTimestamp('log', ` === AI ANALYSIS TRACKING ===`);
+        logWithTimestamp('log', ` Current question: ${this.currentQuestionBeingAsked?.substring(0, 8)}...`);
+        logWithTimestamp('log', ` Analysis question_updates:`, analysis.question_updates);
         
         // NEW: Since we now handle turn completion detection above, this method focuses on AI analysis only
         
         // Process AI updates for currently active question only (no auto-switching from AI)
         if (analysis.question_updates && this.currentQuestionBeingAsked) {
-            console.log(`[ResearchService] Processing AI updates for active question only...`);
+            logWithTimestamp('log', ` Processing AI updates for active question only...`);
             
             // Only process updates for the currently active question
             const activeQuestionUpdates = analysis.question_updates.filter(update => 
@@ -1199,7 +1206,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
             
             if (activeQuestionUpdates.length > 0) {
                 const update = activeQuestionUpdates[0];
-                console.log(`[ResearchService] Processing AI update for active question ${update.questionId.substring(0, 8)}: score=${update.completeness_score}, status=${update.status}`);
+                logWithTimestamp('log', ` Processing AI update for active question ${update.questionId.substring(0, 8)}: score=${update.completeness_score}, status=${update.status}`);
                 
                 // Apply monotonic update for the active question
                 this._applyMonotonicUpdate(update.questionId, {
@@ -1214,20 +1221,20 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
                 update.questionId !== this.currentQuestionBeingAsked
             );
             if (ignoredUpdates.length > 0) {
-                console.log(`[ResearchService] Ignoring ${ignoredUpdates.length} AI-suggested question switches; using speech completion detection instead`);
+                logWithTimestamp('log', ` Ignoring ${ignoredUpdates.length} AI-suggested question switches; using speech completion detection instead`);
             }
         } else if (analysis.question_updates && analysis.question_updates.length > 0 && !this.currentQuestionBeingAsked) {
             // Fallback: If AI suggests a question is active but we have no active question from speech detection
-            console.log('[ResearchService] AI suggests question activity but no active question from speech detection - this may indicate an issue');
+            logWithTimestamp('log', 'AI suggests question activity but no active question from speech detection - this may indicate an issue');
         }
         
         // Log current state for debugging
         if (this.currentQuestionBeingAsked) {
             const question = this.activeQuestions.get(this.currentQuestionBeingAsked);
-            console.log(`[ResearchService] Current question: "${question?.question_text?.substring(0, 50)}..."`);
-            console.log(`[ResearchService] Current answer: "${this.currentAnswerBeingGiven?.substring(0, 100)}..."`);
+            logWithTimestamp('log', ` Current question: "${question?.question_text?.substring(0, 50)}..."`);
+            logWithTimestamp('log', ` Current answer: "${this.currentAnswerBeingGiven?.substring(0, 100)}..."`);
         } else {
-            console.log(`[ResearchService] No current question identified from speech completion detection`);
+            logWithTimestamp('log', ` No current question identified from speech completion detection`);
         }
     }
 
@@ -1247,7 +1254,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
             // Calculate similarity score using word overlap
             const similarity = this.calculateSimilarity(interviewerLower, questionText);
             
-            console.log(`[ResearchService] Similarity check: "${questionText.substring(0, 30)}..." = ${Math.round(similarity * 100)}%`);
+            logWithTimestamp('log', ` Similarity check: "${questionText.substring(0, 30)}..." = ${Math.round(similarity * 100)}%`);
             
             if (similarity > bestScore && similarity >= threshold) {
                 bestScore = similarity;
@@ -1256,7 +1263,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
         }
 
         if (bestMatch) {
-            console.log(`[ResearchService] Best match found with ${Math.round(bestScore * 100)}% similarity: ${bestMatch.question_text?.substring(0, 50)}...`);
+            logWithTimestamp('log', ` Best match found with ${Math.round(bestScore * 100)}% similarity: ${bestMatch.question_text?.substring(0, 50)}...`);
         }
 
         return bestMatch;
@@ -1359,7 +1366,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
         
         // Check if follow-ups are actually needed based on conversation state
         if (!this.shouldSuggestFollowUps()) {
-            console.log(`[ResearchService] Follow-ups not needed - conversation is flowing well`);
+            logWithTimestamp('log', ` Follow-ups not needed - conversation is flowing well`);
             return [];
         }
         
@@ -1368,39 +1375,39 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
             return this.isHighQualityFollowUp(suggestion);
         });
         
-        console.log(`[ResearchService] Quality filtered suggestions from ${suggestions.length} to ${highQualitySuggestions.length}`);
+        logWithTimestamp('log', ` Quality filtered suggestions from ${suggestions.length} to ${highQualitySuggestions.length}`);
         return highQualitySuggestions;
     }
 
     shouldSuggestFollowUps() {
-        console.log(`[ResearchService] 🔍 DEBUG: Checking if should suggest follow-ups...`);
+        logWithTimestamp('log', ` 🔍 DEBUG: Checking if should suggest follow-ups...`);
         
         // Allow follow-ups during any conversation, not just when a specific question is active
         // This enables follow-ups during free-form conversation
         if (!this.currentQuestionBeingAsked) {
-            console.log(`[ResearchService] 🔍 DEBUG: No active question, but allowing follow-ups during free conversation`);
+            logWithTimestamp('log', ` 🔍 DEBUG: No active question, but allowing follow-ups during free conversation`);
             
             // Check if there's any recent conversation to base follow-ups on
             if (this.transcriptBuffer.length === 0) {
-                console.log(`[ResearchService] 🔍 DEBUG: No conversation yet - no follow-ups needed`);
+                logWithTimestamp('log', ` 🔍 DEBUG: No conversation yet - no follow-ups needed`);
                 return false;
             }
             
             // Allow follow-ups if there's been conversation
-            console.log(`[ResearchService] 🔍 DEBUG: Recent conversation detected - follow-ups allowed`);
+            logWithTimestamp('log', ` 🔍 DEBUG: Recent conversation detected - follow-ups allowed`);
             return true;
         }
         
-        console.log(`[ResearchService] 🔍 DEBUG: Active question: ${this.currentQuestionBeingAsked?.substring(0, 8)}...`);
+        logWithTimestamp('log', ` 🔍 DEBUG: Active question: ${this.currentQuestionBeingAsked?.substring(0, 8)}...`);
         
         // Check the completeness of current and recent questions
         const currentResponse = this.questionResponses.get(this.currentQuestionBeingAsked);
         if (!currentResponse) {
-            console.log(`[ResearchService] 🔍 DEBUG: No response found for active question`);
+            logWithTimestamp('log', ` 🔍 DEBUG: No response found for active question`);
             return false;
         }
         
-        console.log(`[ResearchService] 🔍 DEBUG: Current response - score: ${currentResponse.completeness_score}, status: ${currentResponse.status}`);
+        logWithTimestamp('log', ` 🔍 DEBUG: Current response - score: ${currentResponse.completeness_score}, status: ${currentResponse.status}`);
         
         // Only suggest if the current question needs more detail
         const needsMoreDetail = currentResponse.completeness_score < 0.7 || 
@@ -1408,19 +1415,19 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
                                currentResponse.status === 'needs_clarification';
         
         if (!needsMoreDetail) {
-            console.log(`[ResearchService] 🔍 DEBUG: Current question sufficiently complete (score: ${currentResponse.completeness_score}, status: ${currentResponse.status})`);
+            logWithTimestamp('log', ` 🔍 DEBUG: Current question sufficiently complete (score: ${currentResponse.completeness_score}, status: ${currentResponse.status})`);
             return false;
         }
         
-        console.log(`[ResearchService] 🔍 DEBUG: Question needs more detail - checking other conditions...`);
+        logWithTimestamp('log', ` 🔍 DEBUG: Question needs more detail - checking other conditions...`);
         
         // Don't suggest if participant just started answering (give them time)
         if (this.currentAnswerBeingGiven && this.currentAnswerBeingGiven.length < 50) {
-            console.log(`[ResearchService] 🔍 DEBUG: Participant just started answering (${this.currentAnswerBeingGiven.length} chars), waiting for more content`);
+            logWithTimestamp('log', ` 🔍 DEBUG: Participant just started answering (${this.currentAnswerBeingGiven.length} chars), waiting for more content`);
             return false;
         }
         
-        console.log(`[ResearchService] 🔍 DEBUG: Current answer length: ${this.currentAnswerBeingGiven?.length || 0} chars`);
+        logWithTimestamp('log', ` 🔍 DEBUG: Current answer length: ${this.currentAnswerBeingGiven?.length || 0} chars`);
         
         // Don't suggest if we're already showing recent, relevant follow-ups
         if (this.displayedFollowUpQuestions.length > 0) {
@@ -1429,12 +1436,12 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
             
             // Use configured interval instead of hardcoded 15 seconds - much more responsive!
             if (timeSinceLastFollowUp < this.followUpUpdateInterval) {
-                console.log(`[ResearchService] 🔍 DEBUG: Already showing recent follow-ups, waiting ${this.followUpUpdateInterval - timeSinceLastFollowUp}ms`);
+                logWithTimestamp('log', ` 🔍 DEBUG: Already showing recent follow-ups, waiting ${this.followUpUpdateInterval - timeSinceLastFollowUp}ms`);
                 return false;
             }
         }
         
-        console.log(`[ResearchService] 🔍 DEBUG: All conditions passed - should suggest follow-ups!`);
+        logWithTimestamp('log', ` 🔍 DEBUG: All conditions passed - should suggest follow-ups!`);
         return true;
     }
 
@@ -1444,7 +1451,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
         }
         
         // TEMPORARILY DISABLED - Debug why no follow-ups are showing
-        console.log(`[ResearchService] 🔍 DEBUG: Evaluating suggestion: "${suggestion}"`);
+        logWithTimestamp('log', ` 🔍 DEBUG: Evaluating suggestion: "${suggestion}"`);
         
         // For debugging, let's temporarily accept all suggestions that are reasonable length
         // TODO: Re-enable strict filtering once we confirm suggestions are being generated
@@ -1469,21 +1476,21 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
         );
         
         if (hasLowQualityPattern) {
-            console.log(`[ResearchService] Filtered out low-quality suggestion: "${suggestion.substring(0, 50)}..."`);
+            logWithTimestamp('log', ` Filtered out low-quality suggestion: "${suggestion.substring(0, 50)}..."`);
             return false;
         }
         
         // Require suggestions to be specific and reference participant's actual words
         const hasSpecificReference = /you mentioned|when you said|you described|you talked about/i.test(suggestion);
         if (!hasSpecificReference) {
-            console.log(`[ResearchService] Filtered out non-specific suggestion: "${suggestion.substring(0, 50)}..."`);
+            logWithTimestamp('log', ` Filtered out non-specific suggestion: "${suggestion.substring(0, 50)}..."`);
             return false;
         }
         
         // Must be asking for concrete details, examples, or clarification
         const hasGoodIntent = /how does|what happens|can you describe|give an example|specific situation|what would/i.test(suggestion);
         if (!hasGoodIntent) {
-            console.log(`[ResearchService] Filtered out vague suggestion: "${suggestion.substring(0, 50)}..."`);
+            logWithTimestamp('log', ` Filtered out vague suggestion: "${suggestion.substring(0, 50)}..."`);
             return false;
         }
         
@@ -1496,7 +1503,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
     _applyMonotonicUpdate(questionId, {new_completeness, needs_clarification, delta_insights}) {
         const r = this.questionResponses.get(questionId);
         if (!r) {
-            console.warn(`[ResearchService] Cannot apply monotonic update - questionId not found: ${questionId}`);
+            logWithTimestamp('warn', ` Cannot apply monotonic update - questionId not found: ${questionId}`);
             return;
         }
 
@@ -1506,12 +1513,12 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
         if (typeof new_completeness === 'number' && new_completeness > prev) {
             r.completeness_score = new_completeness;
             r.max_completeness = Math.max(r.max_completeness || 0, new_completeness);
-            console.log(`[ResearchService] Completeness increased: ${questionId.substring(0, 8)} ${prev} -> ${new_completeness}`);
+            logWithTimestamp('log', ` Completeness increased: ${questionId.substring(0, 8)} ${prev} -> ${new_completeness}`);
         } else if (typeof new_completeness === 'number' && new_completeness < prev) {
             // Log monotonic block but don't decrease
             this.metrics.monotonicBlocks++;
             r.last_model_score = new_completeness;
-            console.log(`[ResearchService] Monotonic block: ${questionId.substring(0, 8)} tried to decrease ${prev} -> ${new_completeness}`);
+            logWithTimestamp('log', ` Monotonic block: ${questionId.substring(0, 8)} tried to decrease ${prev} -> ${new_completeness}`);
         } else {
             // Same score or invalid - just record what model suggested
             r.last_model_score = new_completeness ?? prev;
@@ -1523,7 +1530,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
             if (r.status !== 'complete') {
                 r.follow_up_needed = 1;
             }
-            console.log(`[ResearchService] Clarification needed for question: ${questionId.substring(0, 8)}`);
+            logWithTimestamp('log', ` Clarification needed for question: ${questionId.substring(0, 8)}`);
         }
 
         // Status promotion rules based on completeness
@@ -1536,23 +1543,51 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
             r.status = 'partial';
         }
 
-        // Merge delta insights
+        // Merge delta insights with smart deduplication
         if (delta_insights?.length) {
+            logWithTimestamp('log', ` 🔍 Delta insights debug:`, {
+                type: typeof delta_insights,
+                isArray: Array.isArray(delta_insights),
+                length: delta_insights.length,
+                rawValue: delta_insights
+            });
+            
             const prevInsights = r.key_insights ? JSON.parse(r.key_insights) : [];
-            r.key_insights = JSON.stringify([...prevInsights, ...delta_insights]);
+            
+            // Ensure delta_insights is an array and contains valid strings
+            const validDeltaInsights = Array.isArray(delta_insights) ? 
+                delta_insights.filter(insight => this._isQualityInsight(insight)) : 
+                [];
+                
+            logWithTimestamp('log', ` 🔍 Filtered delta insights: ${validDeltaInsights.length} valid items`);
+            
+            // Deduplicate insights: Only add new insights that aren't already present
+            const deduplicatedInsights = validDeltaInsights.filter(newInsight => {
+                const similarity = prevInsights.find(existingInsight => 
+                    this._areInsightsSimilar(newInsight, existingInsight)
+                );
+                return !similarity; // Only include if not similar to existing
+            });
+            
+            if (deduplicatedInsights.length > 0) {
+                logWithTimestamp('log', ` 🔍 Adding ${deduplicatedInsights.length} new unique insights`);
+                r.key_insights = JSON.stringify([...prevInsights, ...deduplicatedInsights]);
+            } else {
+                logWithTimestamp('log', ` 🔍 No new unique insights to add (${validDeltaInsights.length} were duplicates)`);
+            }
         }
 
         r.updated_at = tsSec();
         this.questionResponses.set(questionId, r);
         
-        console.log(`[ResearchService] Updated question ${questionId.substring(0, 8)}: score=${r.completeness_score}, status=${r.status}`);
+        logWithTimestamp('log', ` Updated question ${questionId.substring(0, 8)}: score=${r.completeness_score}, status=${r.status}`);
     }
 
     // ==================== INTERVIEWER-DRIVEN QUESTION ACTIVATION ====================
     
     _activateQuestion(questionId, timestamp, turnText) {
         if (!this.activeQuestions.has(questionId)) {
-            console.warn(`[ResearchService] Cannot activate invalid questionId: ${questionId}`);
+            logWithTimestamp('warn', ` Cannot activate invalid questionId: ${questionId}`);
             return false;
         }
         
@@ -1564,13 +1599,23 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
         this.lastInterviewerQuestionAt = timestamp;
         this.metrics.questionActivations++;
         
-        console.log(`[ResearchService] 🔍 DEBUG: ✅ Question activated: ${questionId.substring(0, 8)} - "${question.question_text?.substring(0, 60)}..."`);
-        console.log(`[ResearchService] 🔍 DEBUG: Interviewer turn: "${turnText.substring(0, 100)}..."`);
-        console.log(`[ResearchService] 🔍 DEBUG: Previous question: ${previousQuestionId?.substring(0, 8) || 'none'}`);
+        logWithTimestamp('log', ` 🔍 DEBUG: ✅ Question activated: ${questionId.substring(0, 8)} - "${question.question_text?.substring(0, 60)}..."`);
+        logWithTimestamp('log', ` 🔍 DEBUG: Interviewer turn: "${turnText.substring(0, 100)}..."`);
+        logWithTimestamp('log', ` 🔍 DEBUG: Previous question: ${previousQuestionId?.substring(0, 8) || 'none'}`);
         
         if (previousQuestionId && previousQuestionId !== questionId) {
-            console.log(`[ResearchService] 🔍 DEBUG: Switched from question ${previousQuestionId.substring(0, 8)}`);
+            logWithTimestamp('log', ` 🔍 DEBUG: Switched from question ${previousQuestionId.substring(0, 8)}`);
         }
+        
+        // NEW: Immediately update UI when question is activated
+        logWithTimestamp('log', ` 📡 Emitting immediate UI update for activated question ${questionId.substring(0, 8)}`);
+        this.emit('analysis-update', {
+            status: this.getSessionStatus(),
+            suggestions: this.displayedFollowUpQuestions || [],
+            currentQuestion: this.getCurrentQuestionContext(),
+            nextQuestion: this.getNextQuestionToAsk(),
+            followUpMetrics: this.followUpQuestionMetrics
+        });
         
         return true;
     }
@@ -1588,7 +1633,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
             const threshold = 0.15; // Same as existing threshold
             
             if (best && best.similarity >= threshold) {
-                console.log(`[ResearchService] Interview turn classification: ${best.id.substring(0, 8)} (${Math.round(best.similarity * 100)}% confidence)`);
+                logWithTimestamp('log', ` Interview turn classification: ${best.id.substring(0, 8)} (${Math.round(best.similarity * 100)}% confidence)`);
                 return {
                     questionId: best.id,
                     confidence: best.similarity,
@@ -1596,14 +1641,14 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
                 };
             }
             
-            console.log(`[ResearchService] Interview turn classification: no match (best: ${Math.round((best?.similarity || 0) * 100)}%)`);
+            logWithTimestamp('log', ` Interview turn classification: no match (best: ${Math.round((best?.similarity || 0) * 100)}%)`);
             return {
                 questionId: null,
                 confidence: best?.similarity || 0,
                 is_clarification: false
             };
         } catch (error) {
-            console.error('[ResearchService] Error in interviewer turn classification:', error);
+            logWithTimestamp('error', ' Error in interviewer turn classification:', error);
             return { questionId: null, confidence: 0, is_clarification: false };
         }
     }
@@ -1639,19 +1684,50 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
         const question = this.activeQuestions.get(this.currentQuestionBeingAsked);
         const response = this.questionResponses.get(this.currentQuestionBeingAsked);
         
-        return {
+        // Safely parse key_insights with proper type checking
+        let keyInsights = [];
+        if (response?.key_insights) {
+            try {
+                const parsed = JSON.parse(response.key_insights);
+                // Ensure it's an array, not a string or other type
+                keyInsights = Array.isArray(parsed) ? parsed : [];
+                logWithTimestamp('log', ` 📊 UI UPDATE: Sending ${keyInsights.length} insights for question ${this.currentQuestionBeingAsked.substring(0, 8)}`);
+                if (keyInsights.length > 0) {
+                    logWithTimestamp('log', ` 📊 UI UPDATE: Insights being sent:`, keyInsights);
+                }
+            } catch (error) {
+                logWithTimestamp('warn', ' Failed to parse key_insights:', error, 'Raw data:', response.key_insights);
+                keyInsights = [];
+            }
+        } else {
+            logWithTimestamp('log', ` 📊 UI UPDATE: No insights available for question ${this.currentQuestionBeingAsked.substring(0, 8)}`);
+        }
+        
+        const currentQuestionData = {
             questionId: this.currentQuestionBeingAsked,
             questionText: question?.question_text || '',
             currentAnswer: this.currentAnswerBeingGiven || '',
+            keyInsights,
             status: response?.status || 'not_asked',
             completeness_score: response?.completeness_score || 0.0
         };
+        
+        logWithTimestamp('log', ` 📊 UI UPDATE: Full current question data:`, {
+            questionId: currentQuestionData.questionId.substring(0, 8),
+            hasAnswer: !!currentQuestionData.currentAnswer,
+            answerLength: currentQuestionData.currentAnswer.length,
+            insightCount: currentQuestionData.keyInsights.length,
+            status: currentQuestionData.status,
+            score: currentQuestionData.completeness_score
+        });
+        
+        return currentQuestionData;
     }
 
     getNextQuestionToAsk() {
         // Find the next logical question to ask (prioritize moving forward over completion)
         const questionEntries = Array.from(this.questionResponses.entries());
-        console.log(`[ResearchService] Finding next question from ${questionEntries.length} questions`);
+        logWithTimestamp('log', ` Finding next question from ${questionEntries.length} questions`);
         
         // Priority 1: Next unasked question (ordered by order_index) - keep conversation moving forward
         const unaskedQuestions = questionEntries
@@ -1662,10 +1738,10 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
             })
             .sort((a, b) => a.order_index - b.order_index);
             
-        console.log(`[ResearchService] Found ${unaskedQuestions.length} unasked questions`);
+        logWithTimestamp('log', ` Found ${unaskedQuestions.length} unasked questions`);
         if (unaskedQuestions.length > 0) {
             const nextQuestion = unaskedQuestions[0];
-            console.log(`[ResearchService] Next question: ${nextQuestion.question?.question_text?.substring(0, 50)}...`);
+            logWithTimestamp('log', ` Next question: ${nextQuestion.question?.question_text?.substring(0, 50)}...`);
             return {
                 questionId: nextQuestion.id,
                 questionText: nextQuestion.question?.question_text || '',
@@ -1679,7 +1755,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
         );
         if (partialQuestion) {
             const question = this.activeQuestions.get(partialQuestion[0]);
-            console.log(`[ResearchService] Next question: needs completion - ${question?.question_text?.substring(0, 50)}...`);
+            logWithTimestamp('log', ` Next question: needs completion - ${question?.question_text?.substring(0, 50)}...`);
             return {
                 questionId: partialQuestion[0],
                 questionText: question?.question_text || '',
@@ -1693,7 +1769,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
         );
         if (needFollowUp) {
             const question = this.activeQuestions.get(needFollowUp[0]);
-            console.log(`[ResearchService] Next question: follow-up needed - ${question?.question_text?.substring(0, 50)}...`);
+            logWithTimestamp('log', ` Next question: follow-up needed - ${question?.question_text?.substring(0, 50)}...`);
             return {
                 questionId: needFollowUp[0],
                 questionText: question?.question_text || '',
@@ -1701,7 +1777,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
             };
         }
         
-        console.log(`[ResearchService] No next question found - all questions addressed`);
+        logWithTimestamp('log', ` No next question found - all questions addressed`);
         return null;
     }
 
@@ -1713,7 +1789,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
         const now = Date.now();
         const timeSinceLastUpdate = now - this.lastFollowUpUpdateTime;
         
-        console.log(`[ResearchService] updateFollowUpQuestions called with ${newSuggestions?.length || 0} suggestions`);
+        logWithTimestamp('log', ` updateFollowUpQuestions called with ${newSuggestions?.length || 0} suggestions`);
         if (newSuggestions && newSuggestions.length > 0) {
 
         }
@@ -1725,7 +1801,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
         this.bestFollowUpQuestions = filteredSuggestions.slice(0, 2);
         this.followUpQuestionMetrics.totalSuggested += newSuggestions.length;
         
-        console.log(`[ResearchService] Received ${newSuggestions.length} raw suggestions, filtered to ${filteredSuggestions.length} high-quality ones`);
+        logWithTimestamp('log', ` Received ${newSuggestions.length} raw suggestions, filtered to ${filteredSuggestions.length} high-quality ones`);
         
         // Always expire old questions first
         this.expireOldFollowUpQuestions(now);
@@ -1734,7 +1810,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
         const shouldUpdateFollowUps = this._shouldUpdateDisplayedFollowUps(filteredSuggestions, timeSinceLastUpdate);
         
         if (shouldUpdateFollowUps && filteredSuggestions.length > 0) {
-            console.log(`[ResearchService] 🔍 DEBUG: Updating displayed follow-up questions`);
+            logWithTimestamp('log', ` 🔍 DEBUG: Updating displayed follow-up questions`);
             this.lastFollowUpUpdateTime = now;
             
             // Add new questions that aren't already displayed
@@ -1747,7 +1823,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
                         id: `followup_${now}_${Math.random().toString(36).substr(2, 9)}`
                     });
                     this.metrics.followUpsShown++;
-                    console.log(`[ResearchService] 🔍 DEBUG: Added new follow-up question to display:`, suggestion);
+                    logWithTimestamp('log', ` 🔍 DEBUG: Added new follow-up question to display:`, suggestion);
                 }
             }
             
@@ -1759,13 +1835,13 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
             }
         } else {
             if (filteredSuggestions.length === 0) {
-                console.log(`[ResearchService] 🔍 DEBUG: No high-quality follow-ups to display`);
+                logWithTimestamp('log', ` 🔍 DEBUG: No high-quality follow-ups to display`);
             } else {
-                console.log(`[ResearchService] 🔍 DEBUG: Skipping follow-up update - too soon or no significant changes`);
+                logWithTimestamp('log', ` 🔍 DEBUG: Skipping follow-up update - too soon or no significant changes`);
             }
         }
         
-        console.log(`[ResearchService] 🔍 DEBUG: Currently displaying ${this.displayedFollowUpQuestions.length} follow-up questions:`, this.displayedFollowUpQuestions.map(q => q.text));
+        logWithTimestamp('log', ` 🔍 DEBUG: Currently displaying ${this.displayedFollowUpQuestions.length} follow-up questions:`, this.displayedFollowUpQuestions.map(q => q.text));
     }
     
     _shouldUpdateDisplayedFollowUps(newSuggestions, timeSinceLastUpdate) {
@@ -1790,7 +1866,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
         // Only update if suggestions are significantly different (less than 50% overlap)
         const isDifferent = similarityRatio < 0.5;
         
-        console.log(`[ResearchService] Follow-up similarity check: ${overlap}/${newTexts.length} overlap (${Math.round(similarityRatio * 100)}% similar), isDifferent: ${isDifferent}`);
+        logWithTimestamp('log', ` Follow-up similarity check: ${overlap}/${newTexts.length} overlap (${Math.round(similarityRatio * 100)}% similar), isDifferent: ${isDifferent}`);
         
         return isDifferent;
     }
@@ -1807,7 +1883,7 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
                 return true;
             } else {
                 expiredQuestions.push(question);
-                console.log(`[ResearchService] Expiring follow-up question after ${age}ms:`, question.text);
+                logWithTimestamp('log', ` Expiring follow-up question after ${age}ms:`, question.text);
                 return false;
             }
         });
@@ -1843,25 +1919,25 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
                 questionId: questionId
             });
             
-            console.log(`[ResearchService] Follow-up question marked as asked:`, question.text);
-            console.log(`[ResearchService] Total asked: ${this.followUpQuestionMetrics.totalAsked}/${this.followUpQuestionMetrics.totalSuggested}`);
+            logWithTimestamp('log', ` Follow-up question marked as asked:`, question.text);
+            logWithTimestamp('log', ` Total asked: ${this.followUpQuestionMetrics.totalAsked}/${this.followUpQuestionMetrics.totalSuggested}`);
         }
     }
 
     // ==================== METRICS AND TELEMETRY ====================
     
     _dumpSessionMetrics() {
-        console.log(`[ResearchService] ======= SESSION METRICS =======`);
-        console.log(`[ResearchService] Interviewer turns: ${this.metrics.interviewerTurns}`);
-        console.log(`[ResearchService] Question activations: ${this.metrics.questionActivations}`);
-        console.log(`[ResearchService] Participant turns: ${this.metrics.participantTurns}`);
-        console.log(`[ResearchService] Monotonic blocks: ${this.metrics.monotonicBlocks}`);
-        console.log(`[ResearchService] Follow-ups shown: ${this.metrics.followUpsShown}`);
+        logWithTimestamp('log', ` ======= SESSION METRICS =======`);
+        logWithTimestamp('log', ` Interviewer turns: ${this.metrics.interviewerTurns}`);
+        logWithTimestamp('log', ` Question activations: ${this.metrics.questionActivations}`);
+        logWithTimestamp('log', ` Participant turns: ${this.metrics.participantTurns}`);
+        logWithTimestamp('log', ` Monotonic blocks: ${this.metrics.monotonicBlocks}`);
+        logWithTimestamp('log', ` Follow-ups shown: ${this.metrics.followUpsShown}`);
         
         const activationRate = this.metrics.interviewerTurns > 0 ? 
             (this.metrics.questionActivations / this.metrics.interviewerTurns * 100).toFixed(1) + '%' : 'N/A';
-        console.log(`[ResearchService] Question activation rate: ${activationRate}`);
-        console.log(`[ResearchService] ===============================`);
+        logWithTimestamp('log', ` Question activation rate: ${activationRate}`);
+        logWithTimestamp('log', ` ===============================`);
     }
 
     // ==================== STATUS AND UTILITIES ====================
@@ -1934,6 +2010,107 @@ RESPONSE FORMAT: Valid JSON only, no additional text.`;
                 key_insights: r.key_insights ? JSON.parse(r.key_insights) : []
             }))
         };
+    }
+
+    // ==================== SESSION STATE METHODS ====================
+    
+    /**
+     * Check if a research session is currently active
+     * @returns {boolean} True if session is active and listening
+     */
+    isSessionActive() {
+        return !!(this.currentSession && this.isLiveAnalysisActive);
+    }
+
+    /**
+     * Get current session info for external services
+     * @returns {object|null} Session info or null if not active
+     */
+    getCurrentSessionInfo() {
+        if (!this.isSessionActive()) return null;
+        
+        return {
+            sessionId: this.currentSession.session_id,
+            studyId: this.currentSession.study_id,
+            isLiveAnalysisActive: this.isLiveAnalysisActive,
+            hasActiveQuestion: !!this.currentQuestionBeingAsked
+        };
+    }
+
+    /**
+     * Check if an insight is high quality and meaningful
+     * @param {string} insight - The insight to evaluate
+     * @returns {boolean} True if insight is worth keeping
+     */
+    _isQualityInsight(insight) {
+        if (!insight || typeof insight !== 'string') return false;
+        
+        const trimmed = insight.trim();
+        if (trimmed.length < 10) return false; // Too short
+        
+        // Filter out "no information" type insights
+        const badPhrases = [
+            'no information',
+            'did not provide', 
+            'participant did not',
+            'no specific',
+            'no clear',
+            'unclear',
+            'not mentioned',
+            'did not answer',
+            'did not elaborate',
+            'no details',
+            'not provided',
+            'response was',
+            'single word',
+            'actionable insights',
+            'behaviors has been provided'
+        ];
+        
+        const lowerInsight = trimmed.toLowerCase();
+        return !badPhrases.some(phrase => lowerInsight.includes(phrase));
+    }
+    
+    /**
+     * Check if two insights are similar (to prevent duplicates)
+     * @param {string} insight1 
+     * @param {string} insight2 
+     * @returns {boolean} True if insights are similar enough to be considered duplicates
+     */
+    _areInsightsSimilar(insight1, insight2) {
+        if (!insight1 || !insight2) return false;
+        
+        const normalize = (text) => text.toLowerCase().replace(/[^\w\s]/g, '').trim();
+        const norm1 = normalize(insight1);
+        const norm2 = normalize(insight2);
+        
+        // Exact match after normalization
+        if (norm1 === norm2) return true;
+        
+        // RELAXED: Only consider it a duplicate if one insight is almost entirely contained in the other
+        // This allows for more variation and refinement of insights
+        if (norm1.length > 30 && norm2.length > 30) {
+            // Only mark as duplicate if 90%+ overlap (more specific)
+            const longer = norm1.length > norm2.length ? norm1 : norm2;
+            const shorter = norm1.length > norm2.length ? norm2 : norm1;
+            const overlapThreshold = shorter.length * 0.9;
+            
+            // Check if shorter is almost entirely contained in longer
+            let maxMatch = 0;
+            for (let i = 0; i <= longer.length - shorter.length; i++) {
+                const substring = longer.substring(i, i + shorter.length);
+                let matches = 0;
+                for (let j = 0; j < shorter.length; j++) {
+                    if (substring[j] === shorter[j]) matches++;
+                }
+                maxMatch = Math.max(maxMatch, matches);
+            }
+            
+            return maxMatch >= overlapThreshold;
+        }
+        
+        // For shorter insights, be even more strict about exact matches
+        return false;
     }
 }
 

@@ -319,6 +319,9 @@ contextBridge.exposeInMainWorld('api', {
 
   // src/ui/research/ResearchView.js
   research: {
+    // Debug
+    ping: (message) => ipcRenderer.invoke('research:ping', message),
+    
     // Study Management
     createStudy: (studyData) => ipcRenderer.invoke('research:create-study', studyData),
     getAllStudies: () => ipcRenderer.invoke('research:get-all-studies'),
