@@ -531,7 +531,7 @@ class ResearchService extends EventEmitter {
             logWithTimestamp('error', ' Error starting screen recording:', error);
             // Continue without screen recording if it fails
         }
-        
+
         // Prepare session data to emit
         const sessionData = { 
             studyId, 
@@ -867,8 +867,8 @@ class ResearchService extends EventEmitter {
         
         if (timeSinceLastAnalysis >= this.analysisInterval && !this.pendingAnalysis) {
             logWithTimestamp('log', ` Triggering AI analysis for current question: ${this.currentQuestionBeingAsked.substring(0, 8)}`);
-            await this.analyzeRecentTranscript();
-            this.lastAnalysisTime = now;
+                await this.analyzeRecentTranscript();
+                this.lastAnalysisTime = now;
         }
     }
 
@@ -933,7 +933,7 @@ class ResearchService extends EventEmitter {
                 );
                 
                 logWithTimestamp('log', ` 🎯 Question activated from microphone audio: ${classification.questionId.substring(0, 8)}`);
-            } else {
+        } else {
                 logWithTimestamp('log', ` Complete microphone question but no study question match (off-script)`);
             }
         } else {
@@ -1086,11 +1086,13 @@ CRITICAL RULES FOR KEY INSIGHTS:
 - Leave key_insights EMPTY [] if the response lacks substance
 - Focus on actual user behaviors, pain points, preferences, or experiences mentioned
 - Each insight should be actionable and specific to what was actually said
+- WRITE CONCISE, DIRECT INSIGHTS - remove unnecessary words like "User", "Participant", "Experiences"
+- Use lowercase and bullet-point style, not full sentences
 
-EXAMPLES OF GOOD INSIGHTS:
-✅ "User prefers mobile banking for daily transactions due to convenience"
-✅ "Experiences frustration with multi-factor authentication when traveling"
-✅ "Uses 3 different apps because no single app meets all needs"
+EXAMPLES OF GOOD INSIGHTS (CONCISE STYLE):
+✅ "mobile banking preferred due to convenience"
+✅ "multi-factor authentication during travel is frustrating"
+✅ "uses 3 different apps - no single solution meets all needs"
 
 EXAMPLES OF BAD INSIGHTS (DON'T GENERATE THESE):
 ❌ "Participant did not provide clear information"
@@ -1132,13 +1134,13 @@ ${questions.map(q => `- ${q.id}: ${q.text} (${q.status})`).join('\n')}
 RULES:
 1. Use exact question IDs from above in questionId field
 2. Only update status for clear question-answer exchanges
-3. Generate 2-5 specific key insights per response
+3. Generate 2-5 specific key insights per response - USE CONCISE, BULLET-POINT STYLE
 4. Suggest specific follow-ups that reference participant's words
 5. Focus on user pain points, behaviors, motivations
 
 STATUS: not_asked/partial/complete/needs_clarification
 COMPLETENESS: 0.0-1.0 (conservative scoring)
-INSIGHTS: Focus on actionable user research findings
+INSIGHTS: Write concise, direct insights without "User", "Participant" - lowercase bullet style
 
 Return valid JSON only.`;
     }
@@ -1390,8 +1392,8 @@ Return valid JSON only.`;
             // Check if there's any recent conversation to base follow-ups on
             if (this.transcriptBuffer.length === 0) {
                 logWithTimestamp('log', ` 🔍 DEBUG: No conversation yet - no follow-ups needed`);
-                return false;
-            }
+            return false;
+        }
             
             // Allow follow-ups if there's been conversation
             logWithTimestamp('log', ` 🔍 DEBUG: Recent conversation detected - follow-ups allowed`);
@@ -1690,8 +1692,22 @@ Return valid JSON only.`;
             try {
                 const parsed = JSON.parse(response.key_insights);
                 // Ensure it's an array, not a string or other type
-                keyInsights = Array.isArray(parsed) ? parsed : [];
-                logWithTimestamp('log', ` 📊 UI UPDATE: Sending ${keyInsights.length} insights for question ${this.currentQuestionBeingAsked.substring(0, 8)}`);
+                const rawInsights = Array.isArray(parsed) ? parsed : [];
+                
+                // FINAL DEDUPLICATION: Remove any duplicates before sending to UI
+                keyInsights = [];
+                for (const insight of rawInsights) {
+                    const isDuplicate = keyInsights.some(existing => 
+                        this._areInsightsSimilar(insight, existing)
+                    );
+                    if (!isDuplicate) {
+                        keyInsights.push(insight);
+                    } else {
+                        logWithTimestamp('log', ` 🔍 UI FILTER: Removed duplicate insight: "${insight.substring(0, 60)}..."`);
+                    }
+                }
+                
+                logWithTimestamp('log', ` 📊 UI UPDATE: Sending ${keyInsights.length} insights for question ${this.currentQuestionBeingAsked.substring(0, 8)} (filtered from ${rawInsights.length})`);
                 if (keyInsights.length > 0) {
                     logWithTimestamp('log', ` 📊 UI UPDATE: Insights being sent:`, keyInsights);
                 }
@@ -2087,13 +2103,34 @@ Return valid JSON only.`;
         // Exact match after normalization
         if (norm1 === norm2) return true;
         
-        // RELAXED: Only consider it a duplicate if one insight is almost entirely contained in the other
-        // This allows for more variation and refinement of insights
+        // IMPROVED: Semantic similarity detection for better deduplication
+        
+        // 1. Extract key concepts/words (focus on meaningful terms)
+        const extractKeywords = (text) => {
+            return text.split(/\s+/)
+                .filter(word => word.length > 3) // Skip short words
+                .filter(word => !['uses', 'user', 'apps', 'that', 'this', 'with', 'for', 'the', 'and', 'indicating', 'suggesting', 'preference', 'need'].includes(word))
+                .sort();
+        };
+        
+        const keywords1 = extractKeywords(norm1);
+        const keywords2 = extractKeywords(norm2);
+        
+        // 2. Check for high keyword overlap (semantic similarity)
+        const commonKeywords = keywords1.filter(word => keywords2.includes(word));
+        const keywordSimilarity = commonKeywords.length / Math.max(keywords1.length, keywords2.length);
+        
+        // 3. Check if insights cover the same topic
+        if (keywordSimilarity > 0.6 && commonKeywords.length >= 2) {
+            logWithTimestamp('log', ` 🔍 DUPLICATE DETECTED: "${insight1.substring(0, 50)}..." ≈ "${insight2.substring(0, 50)}..." (${Math.round(keywordSimilarity * 100)}% similar)`);
+            return true;
+        }
+        
+        // 4. Fallback: Character-level overlap for near-exact matches
         if (norm1.length > 30 && norm2.length > 30) {
-            // Only mark as duplicate if 90%+ overlap (more specific)
             const longer = norm1.length > norm2.length ? norm1 : norm2;
             const shorter = norm1.length > norm2.length ? norm2 : norm1;
-            const overlapThreshold = shorter.length * 0.9;
+            const overlapThreshold = shorter.length * 0.85; // Reduced from 90% to 85%
             
             // Check if shorter is almost entirely contained in longer
             let maxMatch = 0;
@@ -2106,10 +2143,12 @@ Return valid JSON only.`;
                 maxMatch = Math.max(maxMatch, matches);
             }
             
-            return maxMatch >= overlapThreshold;
+            if (maxMatch >= overlapThreshold) {
+                logWithTimestamp('log', ` 🔍 DUPLICATE DETECTED: Character overlap (${Math.round(maxMatch/shorter.length * 100)}%)`);
+                return true;
+            }
         }
         
-        // For shorter insights, be even more strict about exact matches
         return false;
     }
 }

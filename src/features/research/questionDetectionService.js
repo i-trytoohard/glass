@@ -198,9 +198,9 @@ class QuestionDetectionService extends EventEmitter {
         const combinedText = (mode === 'refinement' && fullContext) 
             ? fullContext.trim()
             : this.sttBuffer
-                .map(item => item.text)
-                .join(' ')
-                .trim();
+            .map(item => item.text)
+            .join(' ')
+            .trim();
 
         logWithTimestamp('log', `Processing combined text (${mode} mode):`, combinedText);
         
@@ -230,23 +230,23 @@ class QuestionDetectionService extends EventEmitter {
             // Update last utterance to prevent future duplicates
             this.lastUtterance = questionText;
 
-            // Find best matching study question
+        // Find best matching study question
             const matchResult = await this._findBestQuestionMatch(questionText);
-            
-            const event = {
-                utc: Date.now(),
+        
+        const event = {
+            utc: Date.now(),
                 text: questionText,
                 mode: mode, // Track which mode detected this
-                ...matchResult
-            };
+            ...matchResult
+        };
 
             logWithTimestamp('log', `Question detected (${mode} mode):`, event);
-            this.emit('question-detected', event);
+        this.emit('question-detected', event);
         }
 
         // Clear buffer after refinement processing (but not immediate processing)
         if (mode === 'refinement') {
-            this.sttBuffer = [];
+        this.sttBuffer = [];
             logWithTimestamp('log', `Buffer cleared after refinement processing`);
             // Clear the immediate processing tracker after refinement
             this.lastImmediatelyProcessedText = null;
@@ -769,7 +769,7 @@ Examples:
             }
         } catch (error) {
             logWithTimestamp('error', `LLM embedding failed, using fallback:`, error.message);
-            return this._simpleTextEmbedding(text);
+        return this._simpleTextEmbedding(text);
         }
     }
 

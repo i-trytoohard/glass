@@ -401,37 +401,71 @@ export class ResearchView extends LitElement {
             padding-bottom: 8px;
         }
 
-        /* Suggested Follow-ups */
+        /* Suggested Follow-ups - Glassomorphic Style */
         .suggested-followups {
-            background: linear-gradient(135deg, #f0fff4, #e6fffa);
-            border-color: #9ae6b4;
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .suggested-followups::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.1);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+            border-radius: 12px;
+            z-index: -1;
+        }
+
+        .suggested-followups::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            border-radius: 12px;
+            padding: 1px;
+            background: linear-gradient(169deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.05) 50%, rgba(255, 255, 255, 0.15) 100%);
+            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: destination-out;
+            mask-composite: exclude;
+            pointer-events: none;
         }
 
         .followups-container {
             display: flex;
             flex-direction: column;
-            gap: 0px; /* Removed gap since we're using margin-bottom in animations */
+            gap: 6px;
+            padding: 4px;
         }
 
         .followup-item {
-            padding: 12px;
-            background: white;
-            border: 1px solid #c6f6d5;
-            border-radius: 6px;
-            color: #2d3748;
-            border-left: 4px solid #48bb78;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            color: rgba(255, 255, 255, 0.9);
             cursor: pointer;
-            transition: all 0.15s ease; /* Reduced from 0.3s for faster animations */
+            transition: all 0.15s ease;
             opacity: 0;
             transform: translateY(10px);
-            animation: fadeIn 0.25s ease-out forwards; /* Reduced from 0.5s for faster appearance */
+            animation: fadeIn 0.25s ease-out forwards;
+            position: relative;
         }
 
         .followup-item:hover {
-            background: #f0fff4;
-            border-color: #9ae6b4;
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.2);
             transform: translateY(-1px);
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
 
         .followup-item.expiring {
@@ -477,22 +511,24 @@ export class ResearchView extends LitElement {
         }
 
         .followup-text {
-            font-size: 14px;
+            font-size: 13px;
             line-height: 1.4;
-            margin-bottom: 4px;
+            margin-bottom: 3px;
+            color: rgba(255, 255, 255, 0.95);
+            font-weight: 400;
         }
 
         .followup-age {
-            font-size: 11px;
-            color: #718096;
-            opacity: 0.7;
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.5);
+            opacity: 0.8;
         }
 
         .followup-stats {
-            font-size: 12px;
-            color: #718096;
-            font-weight: normal;
-            margin-left: 8px;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.6);
+            font-weight: 400;
+            margin-left: 6px;
         }
 
         /* Current Question */
@@ -670,6 +706,36 @@ export class ResearchView extends LitElement {
             border-radius: 4px;
         }
 
+        /* ────────────────[ GLASS BYPASS ]─────────────── */
+        :host-context(body.has-glass) .research-container,
+        :host-context(body.has-glass) .suggested-followups,
+        :host-context(body.has-glass) .followup-item,
+        :host-context(body.has-glass) .section {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            filter: none !important;
+            backdrop-filter: none !important;
+            border-radius: 0 !important;
+        }
+
+        :host-context(body.has-glass) .research-container::before,
+        :host-context(body.has-glass) .suggested-followups::before,
+        :host-context(body.has-glass) .suggested-followups::after {
+            display: none !important;
+        }
+
+        :host-context(body.has-glass) .followup-item:hover {
+            background: transparent !important;
+            transform: none !important;
+        }
+
+        :host-context(body.has-glass) * {
+            animation: none !important;
+            transition: none !important;
+            transform: none !important;
+        }
+
     `;
 
     static properties = {
@@ -718,6 +784,9 @@ export class ResearchView extends LitElement {
             totalAsked: 0,
             totalSuggested: 0
         };
+        
+        // Initialize expiring questions set
+        this.expiringQuestions = new Set();
         
         console.log('[ResearchView] Constructor - Component initialized');
     }
